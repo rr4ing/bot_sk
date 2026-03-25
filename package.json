@@ -15,7 +15,7 @@
     "test": "npm run test --workspace @builderbot/domain && npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run test --workspace @builderbot/api",
     "prisma:generate": "prisma generate --schema infra/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema infra/prisma/schema.prisma",
-    "prisma:seed": "tsx infra/prisma/seed.ts"
+    "prisma:seed": "npx tsx infra/prisma/seed.ts"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
