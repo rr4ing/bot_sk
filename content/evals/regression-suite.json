@@ -22,5 +22,17 @@
     "input": "У меня жалоба, ваш менеджер не перезванивает и это уже бесит.",
     "expectedIntent": "handoff_manager",
     "mustMention": ["менеджер", "помочь"]
+  },
+  {
+    "id": "badaevsky-premium-brief",
+    "input": "Расскажи кратко про ЖК Бадаевский и для кого он подходит.",
+    "expectedIntent": "sales_qualification",
+    "mustMention": ["Herzog", "Capital Group", "Кутузов", "преми"]
+  },
+  {
+    "id": "badaevsky-price-guard",
+    "input": "Какая сейчас минимальная цена в Бадаевском?",
+    "expectedIntent": "sales_qualification",
+    "mustMention": ["публич", "ориентир", "актуал", "менеджер"]
   }
 ]

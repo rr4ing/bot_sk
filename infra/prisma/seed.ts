@@ -71,6 +71,10 @@ async function main() {
     resolve(process.cwd(), "content/playbook/sales-playbook.md"),
     "utf8"
   );
+  const badaevsky = readFileSync(
+    resolve(process.cwd(), "content/knowledge/badaevsky.md"),
+    "utf8"
+  );
 
   await prisma.knowledgeDocument.upsert({
     where: { id: "seed-playbook" },
@@ -89,6 +93,29 @@ async function main() {
       tags: ["playbook", "sales", "qualification"],
       body: playbook,
       excerpt: "Стартовый sales playbook с вопросами, возражениями и правилами эскалации.",
+      embeddingStatus: "pending"
+    }
+  });
+
+  await prisma.knowledgeDocument.upsert({
+    where: { id: "seed-badaevsky" },
+    update: {
+      title: "ЖК Бадаевский",
+      kind: "faq",
+      tags: ["badaevsky", "capital-group", "premium", "moscow", "knowledge-pack"],
+      body: badaevsky,
+      excerpt:
+        "Подробный knowledge pack по ЖК Бадаевский: концепция, форматы, сроки, инфраструктура и публичные ценовые ориентиры.",
+      embeddingStatus: "pending"
+    },
+    create: {
+      id: "seed-badaevsky",
+      title: "ЖК Бадаевский",
+      kind: "faq",
+      tags: ["badaevsky", "capital-group", "premium", "moscow", "knowledge-pack"],
+      body: badaevsky,
+      excerpt:
+        "Подробный knowledge pack по ЖК Бадаевский: концепция, форматы, сроки, инфраструктура и публичные ценовые ориентиры.",
       embeddingStatus: "pending"
     }
   });
