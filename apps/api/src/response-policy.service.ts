@@ -36,7 +36,7 @@ export class ResponsePolicyService {
       const unitPreview = filteredUnits
         .map(
           (unit) =>
-            `• ${unit.code}: ${unit.rooms === 0 ? "студия" : `${unit.rooms}-комн.`}, ${unit.areaSqm} м2, ${new Intl.NumberFormat("ru-RU").format(unit.priceRub)} RUB`
+            `• ${unit.code}: ${unit.rooms === 0 ? "студия" : `${unit.rooms}-комн.`}, ${unit.areaSqm} м², ${new Intl.NumberFormat("ru-RU").format(unit.priceRub)} ₽`
         )
         .join("\n");
 

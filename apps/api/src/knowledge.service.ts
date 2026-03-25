@@ -54,7 +54,7 @@ export class KnowledgeService {
       take: 12
     });
 
-    return docs
+    const ranked = docs
       .map((doc) => {
         const haystack = `${doc.title} ${doc.tags.join(" ")} ${doc.body}`.toLowerCase();
         const score = tokens.reduce(
@@ -65,7 +65,13 @@ export class KnowledgeService {
         return { doc, score };
       })
       .sort((left, right) => right.score - left.score)
-      .slice(0, 4)
       .map((entry) => entry.doc);
+
+    const alwaysInclude = docs
+      .filter((doc) => doc.kind === "sales_script")
+      .slice(0, 2);
+
+    return Array.from(new Map([...alwaysInclude, ...ranked].map((doc) => [doc.id, doc])).values())
+      .slice(0, 6);
   }
 }

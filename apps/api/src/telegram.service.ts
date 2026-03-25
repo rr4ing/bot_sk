@@ -48,7 +48,7 @@ export class TelegramService {
     await this.conversations.appendMessage(conversation.id, "user", messageText, update);
 
     const [activeProject, candidateUnits, knowledgeDocuments, history] = await Promise.all([
-      this.catalog.getActiveProject(),
+      this.catalog.getRelevantProject(messageText),
       this.catalog.findCandidateUnits(messageText),
       this.knowledge.getRelevantDocuments(messageText),
       this.conversations.getHistory(conversation.id)
@@ -136,24 +136,61 @@ export class TelegramService {
   }
 
   private buildReplyKeyboard(missingFields: string[]) {
-    if (missingFields.includes("budget")) {
+    const orderedFields = ["phone", "purpose", "budget", "rooms", "timeline"] as const;
+    const nextField = orderedFields.find((field) => missingFields.includes(field));
+
+    if (nextField === "phone") {
       return {
-        keyboard: [[{ text: "до 8 млн" }, { text: "8-15 млн" }, { text: "15+ млн" }]],
-        resize_keyboard: true
+        keyboard: [
+          [{ text: "Отправить контакт", request_contact: true }],
+          [{ text: "Напишу номер сообщением" }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true
       };
     }
 
-    if (missingFields.includes("rooms")) {
+    if (nextField === "purpose") {
       return {
-        keyboard: [[{ text: "Студия" }, { text: "1-комнатная" }, { text: "2-комнатная" }]],
-        resize_keyboard: true
+        keyboard: [
+          [{ text: "Для себя" }, { text: "Для семьи" }],
+          [{ text: "Для инвестиций" }, { text: "Для родителей" }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true
       };
     }
 
-    if (missingFields.includes("timeline")) {
+    if (nextField === "budget") {
       return {
-        keyboard: [[{ text: "Покупка в течение месяца" }, { text: "До 3 месяцев" }]],
-        resize_keyboard: true
+        keyboard: [
+          [{ text: "до 20 млн" }, { text: "20-40 млн" }],
+          [{ text: "40-80 млн" }, { text: "80+ млн" }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true
+      };
+    }
+
+    if (nextField === "rooms") {
+      return {
+        keyboard: [
+          [{ text: "Студия" }, { text: "1-комнатная" }],
+          [{ text: "2-комнатная" }, { text: "3-комнатная+" }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true
+      };
+    }
+
+    if (nextField === "timeline") {
+      return {
+        keyboard: [
+          [{ text: "Срочно, до месяца" }, { text: "1-3 месяца" }],
+          [{ text: "3-6 месяцев" }, { text: "Пока присматриваюсь" }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true
       };
     }
 

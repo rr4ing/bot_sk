@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, Unit } from "@prisma/client";
+import { Prisma, Project, Unit } from "@prisma/client";
 import { PrismaService } from "./prisma.service";
 import { z } from "zod";
 
@@ -32,10 +32,24 @@ export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getActiveProject() {
-    return this.prisma.project.findFirst({
+    return this.getRelevantProject();
+  }
+
+  async getRelevantProject(messageText?: string) {
+    const projects = await this.prisma.project.findMany({
       where: { status: "active" },
       orderBy: { createdAt: "asc" }
     });
+
+    if (!projects.length) {
+      return null;
+    }
+
+    if (!messageText) {
+      return projects[0];
+    }
+
+    return this.findRelevantProjectInText(messageText, projects) ?? projects[0];
   }
 
   async listProjects() {
@@ -85,16 +99,24 @@ export class CatalogService {
   async findCandidateUnits(messageText: string) {
     const parsedBudget = this.extractBudget(messageText);
     const parsedRooms = this.extractRooms(messageText);
+    const project = await this.getRelevantProject(messageText);
     const where: Prisma.UnitWhereInput = {
-      status: "available"
+      status: "available",
+      priceRub: {
+        gt: 0
+      }
     };
 
     if (parsedBudget) {
-      where.priceRub = { lte: parsedBudget };
+      where.priceRub = { gt: 0, lte: parsedBudget };
     }
 
     if (parsedRooms !== null) {
       where.rooms = parsedRooms;
+    }
+
+    if (project) {
+      where.projectId = project.id;
     }
 
     const units = await this.prisma.unit.findMany({
@@ -150,5 +172,44 @@ export class CatalogService {
       finishing: unit.finishing,
       perks: unit.perks
     }));
+  }
+
+  private findRelevantProjectInText(messageText: string, projects: Project[]) {
+    const normalizedMessage = this.normalizeSearchText(messageText);
+    let bestMatch: Project | null = null;
+    let bestScore = 0;
+
+    for (const project of projects) {
+      const normalizedName = this.normalizeSearchText(project.name);
+      const tokens = this.tokenizeSearchText(
+        `${project.name} ${project.district} ${project.city}`
+      );
+      let score = 0;
+
+      if (normalizedName && normalizedMessage.includes(normalizedName)) {
+        score += 10;
+      }
+
+      for (const token of tokens) {
+        if (token.length >= 4 && normalizedMessage.includes(token)) {
+          score += 1;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = project;
+      }
+    }
+
+    return bestScore > 0 ? bestMatch : null;
+  }
+
+  private normalizeSearchText(value: string) {
+    return value.toLowerCase().replace(/ё/g, "е").replace(/[^a-zа-я0-9]+/gi, " ").trim();
+  }
+
+  private tokenizeSearchText(value: string) {
+    return Array.from(new Set(this.normalizeSearchText(value).split(/\s+/).filter(Boolean)));
   }
 }

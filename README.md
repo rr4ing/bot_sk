@@ -1,6 +1,6 @@
 # Builder Sales Bot
 
-Telegram-бот для продаж и поддержки строительной компании. Проект реализован как монорепо с `NestJS` API, `Next.js` backoffice, Prisma/PostgreSQL, Redis-очередями и AI-оркестрацией через OpenAI Responses API.
+Telegram-бот для продаж и поддержки строительной компании. Проект реализован как монорепо с `NestJS` API, `Next.js` backoffice, Prisma/PostgreSQL, Redis-очередями и AI-оркестрацией через `OpenAI Responses API` или `xAI Grok` по OpenAI-совместимому API.
 
 ## Структура
 
@@ -56,8 +56,18 @@ npm run dev:admin
 
 - Контракт `AIDecision` со строгой валидацией.
 - Политика против галлюцинаций по ценам, доступности и юридическим обещаниям.
-- Fallback AI-режим без OpenAI ключа для локальной разработки.
+- Поддержка `AI_PROVIDER=auto|openai|xai`; при наличии `XAI_API_KEY` бот может отвечать через `Grok`.
+- Fallback AI-режим без внешнего AI ключа для локальной разработки.
 - `Telegram polling` режим для деплоя без домена и HTTPS.
 - `QUEUE_MODE=inline` для дешевого демо-деплоя без отдельного worker.
 - Очереди для уведомлений менеджерам и расчета embeddings документов.
 - Скелет eval-регрессии и sales playbook, с которого можно начинать наполнение.
+
+## AI-провайдеры
+
+- Для чата можно использовать `OpenAI` или `xAI Grok`.
+- Если `AI_PROVIDER=auto`, приоритет такой:
+  - `XAI_API_KEY` -> `Grok`
+  - `OPENAI_API_KEY` -> `OpenAI`
+  - если ключей нет, включается локальный fallback-режим
+- Embeddings пока остаются на `OPENAI_API_KEY`; если его нет, используется локальный fallback-вектор для демо.

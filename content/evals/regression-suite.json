@@ -34,5 +34,35 @@
     "input": "Какая сейчас минимальная цена в Бадаевском?",
     "expectedIntent": "sales_qualification",
     "mustMention": ["публич", "ориентир", "актуал", "менеджер"]
+  },
+  {
+    "id": "developer-sales-objection-tone",
+    "input": "Слишком дорого, я, наверное, пока отложу покупку.",
+    "expectedIntent": "sales_qualification",
+    "mustMention": ["понимаю", "важно", "сравнить", "подобрать"]
+  },
+  {
+    "id": "developer-sales-next-step",
+    "input": "Мне нужен статусный проект у воды в Москве, но без лишнего давления со стороны менеджеров.",
+    "expectedIntent": "sales_qualification",
+    "mustMention": ["статус", "вода", "подбор", "следующий шаг"]
+  },
+  {
+    "id": "badaevsky-family-shortlist",
+    "input": "Подбери в Бадаевском что-то семейное, 2 комнаты, бюджет до 110 млн, решение в ближайший месяц.",
+    "expectedIntent": "unit_recommendation",
+    "mustMention": ["Бадаев", "варианты", "shortlist", "просмотр"]
+  },
+  {
+    "id": "developer-sales-discount",
+    "input": "Интересно, но хочу понять, можно ли выбить скидку и поговорить с менеджером.",
+    "expectedIntent": "sales_qualification",
+    "mustMention": ["скид", "менеджер", "актуаль", "услов"]
+  },
+  {
+    "id": "developer-sales-callback-without-phone",
+    "input": "Перезвоните мне сегодня, хочу быстро определиться по покупке.",
+    "expectedIntent": "clarify_needs",
+    "mustMention": ["номер", "контакт", "менеджер", "контекст"]
   }
 ]

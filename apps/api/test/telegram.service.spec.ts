@@ -16,7 +16,7 @@ describe("TelegramService", () => {
         updateConversationSummary
       } as never,
       {
-        getActiveProject: jest.fn().mockResolvedValue(null),
+        getRelevantProject: jest.fn().mockResolvedValue(null),
         findCandidateUnits: jest.fn().mockResolvedValue([]),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
@@ -69,6 +69,77 @@ describe("TelegramService", () => {
         type: "lead",
         leadId: "lead-1",
         leadScore: 90
+      })
+    );
+  });
+
+  it("offers purpose quick replies before generic qualification", async () => {
+    const sendMessage = jest.fn();
+    const service = new TelegramService(
+      {
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-2" }),
+        appendMessage: jest.fn(),
+        getHistory: jest.fn().mockResolvedValue([]),
+        updateConversationSummary: jest.fn()
+      } as never,
+      {
+        getRelevantProject: jest.fn().mockResolvedValue(null),
+        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        extractBudget: jest.fn().mockReturnValue(null),
+        extractRooms: jest.fn().mockReturnValue(null)
+      } as never,
+      {
+        getRelevantDocuments: jest.fn().mockResolvedValue([])
+      } as never,
+      {
+        decide: jest.fn().mockResolvedValue({
+          intent: "sales_qualification",
+          reply_text: "Помогу с подбором. Для чего покупаете?",
+          recommended_unit_ids: [],
+          lead_score: 42,
+          handoff_required: false,
+          support_ticket_required: false,
+          missing_fields: ["purpose", "budget", "rooms"],
+          policy_flags: []
+        })
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    await service.handleIncomingUpdate({
+      update_id: 2,
+      message: {
+        message_id: 2,
+        date: Date.now(),
+        text: "Подберите квартиру",
+        chat: { id: 20, type: "private" },
+        from: { id: 30, is_bot: false, first_name: "Анна" }
+      }
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyMarkup: expect.objectContaining({
+          keyboard: [
+            [{ text: "Для себя" }, { text: "Для семьи" }],
+            [{ text: "Для инвестиций" }, { text: "Для родителей" }]
+          ]
+        })
       })
     );
   });

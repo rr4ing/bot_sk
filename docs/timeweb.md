@@ -15,9 +15,13 @@
 - `DIRECT_URL`
 - `REDIS_URL`
 - `QUEUE_MODE`
+- `AI_PROVIDER=auto|openai|xai`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL=gpt-5-mini`
 - `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`
+- `XAI_API_KEY`
+- `XAI_MODEL=grok-4-1-fast`
+- `XAI_BASE_URL=https://api.x.ai/v1`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `TELEGRAM_MANAGER_CHAT_ID`
@@ -29,6 +33,16 @@
 ## Настройка webhook
 
 Если у тебя пока только IP без домена и TLS, используй `TELEGRAM_TRANSPORT=polling`. Тогда webhook не нужен, и API сам забирает апдейты через `getUpdates`.
+
+Если хочешь переключить чат-бота на `Grok`, достаточно выставить:
+
+```bash
+AI_PROVIDER=xai
+XAI_API_KEY=<your_xai_key>
+XAI_MODEL=grok-4-1-fast
+```
+
+Embeddings документов при этом могут остаться на `OPENAI_API_KEY`, либо уйдут в локальный fallback для демо-режима.
 
 После деплоя нужно вызвать:
 
