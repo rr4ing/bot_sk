@@ -1,0 +1,33 @@
+{
+  "name": "builder-sales-bot",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@11.8.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run build --workspace @builderbot/ui && npm run build --workspace @builderbot/api && npm run build --workspace @builderbot/worker && npm run build --workspace @builderbot/admin",
+    "dev": "npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run dev --workspace @builderbot/api",
+    "dev:admin": "npm run build --workspace @builderbot/ui && npm run dev --workspace @builderbot/admin",
+    "dev:worker": "npm run build --workspace @builderbot/config && npm run dev --workspace @builderbot/worker",
+    "test": "npm run test --workspace @builderbot/domain && npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run test --workspace @builderbot/api",
+    "prisma:generate": "prisma generate --schema infra/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema infra/prisma/schema.prisma",
+    "prisma:seed": "tsx infra/prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "jest": "^29.7.0",
+    "prisma": "^6.5.0",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

@@ -1,0 +1,196 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ProjectStatus {
+  active
+  paused
+  sold_out
+}
+
+enum UnitStatus {
+  available
+  reserved
+  sold
+}
+
+enum LeadStatus {
+  new
+  qualified
+  assigned
+  won
+  lost
+}
+
+enum SupportStatus {
+  new
+  in_progress
+  resolved
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+}
+
+enum KnowledgeDocumentKind {
+  faq
+  sales_script
+  objection_matrix
+  promo
+  mortgage
+  policy
+}
+
+enum EmbeddingStatus {
+  pending
+  ready
+  failed
+}
+
+model Project {
+  id             String        @id @default(cuid())
+  name           String
+  city           String
+  district       String
+  description    String
+  salesHeadline  String
+  handoffPhone   String?
+  status         ProjectStatus @default(active)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  units          Unit[]
+  prompts        PromptVersion[]
+  auditLogs      AuditLog[]
+}
+
+model Unit {
+  id            String     @id @default(cuid())
+  projectId     String
+  project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  code          String     @unique
+  rooms         Int
+  floor         Int
+  areaSqm       Float
+  priceRub      Int
+  finishing     String
+  status        UnitStatus @default(available)
+  availableFrom DateTime?
+  perks         String[]
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model Conversation {
+  id               String    @id @default(cuid())
+  telegramChatId   String    @unique
+  telegramUserId   String?
+  telegramUsername String?
+  firstName        String?
+  lastName         String?
+  channel          String    @default("telegram")
+  latestIntent     String?
+  leadScore        Int       @default(0)
+  summary          String?
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  messages         Message[]
+  lead             Lead?
+  supportTickets   SupportTicket[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String
+  rawPayload     Json?
+  createdAt      DateTime     @default(now())
+}
+
+model Lead {
+  id                  String       @id @default(cuid())
+  conversationId      String       @unique
+  conversation        Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  fullName            String?
+  phone               String?
+  summary             String
+  intent              String
+  leadScore           Int
+  status              LeadStatus   @default(new)
+  assignedManagerName String?
+  assignedManagerChat String?
+  budgetMinRub        Int?
+  budgetMaxRub        Int?
+  roomsWanted         Int?
+  purpose             String?
+  timeline            String?
+  lastAiDecision      Json?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  auditLogs           AuditLog[]
+}
+
+model SupportTicket {
+  id                 String        @id @default(cuid())
+  conversationId     String
+  conversation       Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customerName       String?
+  phone              String?
+  topic              String
+  summary            String
+  status             SupportStatus @default(new)
+  assignedManager    String?
+  latestAiDecision   Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+model KnowledgeDocument {
+  id              String                @id @default(cuid())
+  title           String
+  kind            KnowledgeDocumentKind
+  tags            String[]
+  body            String
+  excerpt         String
+  sourcePath      String?
+  embedding       Float[]
+  embeddingStatus EmbeddingStatus       @default(pending)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+}
+
+model PromptVersion {
+  id          String   @id @default(cuid())
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  name        String
+  description String
+  content     String
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actor       String
+  action      String
+  entityType  String
+  entityId    String
+  payload     Json?
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  leadId      String?
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+}

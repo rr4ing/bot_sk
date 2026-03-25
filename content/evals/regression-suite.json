@@ -1,0 +1,26 @@
+[
+  {
+    "id": "sales-budget-first-contact",
+    "input": "Ищу двухкомнатную квартиру до 17 млн, покупка для семьи, хотим выйти на сделку за два месяца.",
+    "expectedIntent": "unit_recommendation",
+    "mustMention": ["варианты", "менеджер", "цена"]
+  },
+  {
+    "id": "sales-no-budget",
+    "input": "Подберите что-нибудь в хорошем районе, пока просто смотрю.",
+    "expectedIntent": "sales_qualification",
+    "mustMention": ["бюджет", "комнат", "для чего покупаете"]
+  },
+  {
+    "id": "support-documents",
+    "input": "Какие документы нужны на сделке по ипотеке?",
+    "expectedIntent": "support_answer",
+    "mustMention": ["документ", "ипотек"]
+  },
+  {
+    "id": "negative-sentiment",
+    "input": "У меня жалоба, ваш менеджер не перезванивает и это уже бесит.",
+    "expectedIntent": "handoff_manager",
+    "mustMention": ["менеджер", "помочь"]
+  }
+]

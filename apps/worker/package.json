@@ -1,0 +1,19 @@
+{
+  "name": "@builderbot/worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@builderbot/config": "0.1.0",
+    "@prisma/client": "^6.5.0",
+    "bullmq": "^5.46.1",
+    "ioredis": "^5.4.2",
+    "openai": "^4.90.0",
+    "zod": "^3.24.2"
+  }
+}

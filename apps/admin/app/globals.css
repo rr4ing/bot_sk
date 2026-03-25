@@ -1,0 +1,76 @@
+:root {
+  --bg: #f8fafc;
+  --bg-accent: #eef6ff;
+  --ink: #0f172a;
+  --muted: #475569;
+  --line: rgba(15, 23, 42, 0.12);
+  --card: rgba(255, 255, 255, 0.88);
+  --teal: #0f766e;
+  --amber: #b45309;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.12), transparent 35%),
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 30%),
+    linear-gradient(180deg, var(--bg-accent) 0%, var(--bg) 40%, #ffffff 100%);
+  color: var(--ink);
+  font-family:
+    "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+button {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #0f766e 0%, #0f172a 100%);
+  color: white;
+  cursor: pointer;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}

@@ -1,0 +1,62 @@
+services:
+  - type: web
+    name: builder-sales-bot-api
+    runtime: node
+    plan: free
+    rootDir: .
+    region: frankfurt
+    buildCommand: npm ci && npm run prisma:generate && npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run build --workspace @builderbot/api
+    startCommand: npx prisma migrate deploy --schema infra/prisma/schema.prisma && node apps/api/dist/main.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: builder-sales-bot-db
+          property: connectionString
+      - key: DIRECT_URL
+        fromDatabase:
+          name: builder-sales-bot-db
+          property: connectionString
+      - key: QUEUE_MODE
+        value: inline
+      - key: TELEGRAM_TRANSPORT
+        value: polling
+      - key: OPENAI_MODEL
+        value: gpt-5-mini
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_MANAGER_CHAT_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_PUBLIC_URL
+        value: https://builder-sales-bot-admin.onrender.com
+      - key: APP_PUBLIC_URL
+        value: https://builder-sales-bot-api.onrender.com
+
+  - type: web
+    name: builder-sales-bot-admin
+    runtime: node
+    plan: free
+    rootDir: .
+    region: frankfurt
+    buildCommand: npm ci && npm run build --workspace @builderbot/ui && npm run build --workspace @builderbot/admin
+    startCommand: npm run start --workspace @builderbot/admin
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_API_URL
+        value: https://builder-sales-bot-api.onrender.com
+
+databases:
+  - name: builder-sales-bot-db
+    databaseName: builder_sales_bot
+    plan: free
