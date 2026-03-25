@@ -6,7 +6,7 @@ services:
     rootDir: .
     region: frankfurt
     buildCommand: npm ci && npm run prisma:generate && npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run build --workspace @builderbot/api
-    startCommand: npx prisma migrate deploy --schema infra/prisma/schema.prisma && node apps/api/dist/main.js
+    startCommand: npx prisma db push --schema infra/prisma/schema.prisma && npm run prisma:seed && node apps/api/dist/main.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -53,6 +53,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 10000
       - key: ADMIN_API_URL
         value: https://builder-sales-bot-api.onrender.com
 
