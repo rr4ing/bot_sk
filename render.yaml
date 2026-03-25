@@ -5,7 +5,7 @@ services:
     plan: free
     rootDir: .
     region: frankfurt
-    buildCommand: npm ci && npm run prisma:generate && npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run build --workspace @builderbot/api
+    buildCommand: npm install && npm run prisma:generate && npm run build --workspace @builderbot/config && npm run build --workspace @builderbot/domain && npm run build --workspace @builderbot/api
     startCommand: npx prisma db push --schema infra/prisma/schema.prisma && npm run prisma:seed && node apps/api/dist/main.js
     healthCheckPath: /health
     envVars:
@@ -48,7 +48,7 @@ services:
     plan: free
     rootDir: .
     region: frankfurt
-    buildCommand: npm ci && npm run build --workspace @builderbot/ui && npm run build --workspace @builderbot/admin
+    buildCommand: npm install && npm run build --workspace @builderbot/ui && npm run build --workspace @builderbot/admin
     startCommand: npm run start --workspace @builderbot/admin
     envVars:
       - key: NODE_ENV
