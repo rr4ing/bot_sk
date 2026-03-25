@@ -14,13 +14,9 @@ services:
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        fromDatabase:
-          name: builder-sales-bot-db
-          property: connectionString
+        sync: false
       - key: DIRECT_URL
-        fromDatabase:
-          name: builder-sales-bot-db
-          property: connectionString
+        sync: false
       - key: QUEUE_MODE
         value: inline
       - key: AI_PROVIDER
@@ -70,3 +66,4 @@ databases:
   - name: builder-sales-bot-db
     databaseName: builder_sales_bot
     plan: free
+    region: frankfurt
