@@ -445,15 +445,14 @@ export class AiService {
   }
 
   private collectSignals(messageText: string, context: DecisionContext): SalesSignals {
-    const transcript = context.conversationText?.trim()
-      ? context.conversationText
-      : this.buildConversationText(messageText, context);
+    const conversationMessages = this.getConversationUserMessages(messageText, context);
+    const transcript = conversationMessages.join("\n");
     const normalized = transcript.toLowerCase();
     const currentNormalized = messageText.toLowerCase().trim();
-    const budgetRub = this.catalog.extractBudget(transcript);
-    const rooms = this.catalog.extractRooms(transcript);
-    const purpose = this.extractPurpose(normalized);
-    const timeline = this.extractTimeline(normalized);
+    const budgetRub = this.extractLatestBudget(conversationMessages);
+    const rooms = this.extractLatestRooms(conversationMessages);
+    const purpose = this.extractLatestPurpose(conversationMessages);
+    const timeline = this.extractLatestTimeline(conversationMessages);
     const isGreeting = this.isGreetingMessage(currentNormalized);
     const isShortReply = currentNormalized.length <= 24 && !/\d{6,}/.test(currentNormalized);
     const isPurposeOnly =
@@ -578,6 +577,64 @@ export class AiService {
     ].join("\n");
   }
 
+  private getConversationUserMessages(messageText: string, context: DecisionContext) {
+    const messages = context.history
+      .filter((entry) => entry.role === "user")
+      .map((entry) => entry.content.trim())
+      .filter(Boolean);
+    const lastKnownMessage = messages.at(-1)?.toLowerCase();
+
+    if (messageText.trim() && lastKnownMessage !== messageText.trim().toLowerCase()) {
+      messages.push(messageText.trim());
+    }
+
+    return messages;
+  }
+
+  private extractLatestBudget(messages: string[]) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const budget = this.catalog.extractBudget(messages[index]);
+      if (budget !== null) {
+        return budget;
+      }
+    }
+
+    return null;
+  }
+
+  private extractLatestRooms(messages: string[]) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const rooms = this.catalog.extractRooms(messages[index]);
+      if (rooms !== null) {
+        return rooms;
+      }
+    }
+
+    return null;
+  }
+
+  private extractLatestPurpose(messages: string[]) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const purpose = this.extractPurpose(messages[index].toLowerCase());
+      if (purpose) {
+        return purpose;
+      }
+    }
+
+    return null;
+  }
+
+  private extractLatestTimeline(messages: string[]) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const timeline = this.extractTimeline(messages[index].toLowerCase());
+      if (timeline) {
+        return timeline;
+      }
+    }
+
+    return null;
+  }
+
   private normalizeDecision(
     messageText: string,
     context: DecisionContext,
@@ -591,9 +648,12 @@ export class AiService {
       signals
     );
     const guidedQuestion = this.buildGuidedQuestion(missingFields, context);
+    const knownFactsSummary = this.buildKnownFactsSummary(signals, context);
     const lastAssistantMessage = context.history
       .filter((entry) => entry.role === "assistant")
       .at(-1)?.content;
+    const shortlistReady = this.isShortlistReady(signals, context);
+    const reasksKnownInfo = this.isReaskingKnownInfo(decision.reply_text, signals);
 
     if (!fromModel && signals.isGreeting && !signals.wantsProjectOverview) {
       return aiDecisionSchema.parse({
@@ -660,6 +720,44 @@ export class AiService {
         support_ticket_required: false,
         missing_fields: missingFields,
         policy_flags: []
+      });
+    }
+
+    if (
+      shortlistReady &&
+      context.candidateUnits.length > 0 &&
+      !signals.wantsManager &&
+      !signals.wantsCallback &&
+      decision.intent !== "handoff_manager" &&
+      decision.intent !== "support_answer" &&
+      decision.intent !== "support_ticket"
+    ) {
+      return aiDecisionSchema.parse({
+        ...decision,
+        intent: "unit_recommendation",
+        reply_text: `${knownFactsSummary} Данных уже достаточно, поэтому не буду гонять вас по кругу вопросами. Сразу покажу самые релевантные варианты и коротко поясню, почему именно они сейчас ближе к вашему сценарию.`,
+        recommended_unit_ids:
+          decision.recommended_unit_ids.length > 0
+            ? decision.recommended_unit_ids
+            : context.candidateUnits.slice(0, 3).map((unit) => unit.id),
+        missing_fields: [],
+        policy_flags: decision.policy_flags
+      });
+    }
+
+    if (
+      reasksKnownInfo &&
+      missingFields.length > 0 &&
+      decision.intent !== "handoff_manager" &&
+      decision.intent !== "support_answer" &&
+      decision.intent !== "support_ticket"
+    ) {
+      return aiDecisionSchema.parse({
+        ...decision,
+        intent: "clarify_needs",
+        reply_text: `${knownFactsSummary} ${guidedQuestion}`,
+        recommended_unit_ids: canRecommendUnits ? decision.recommended_unit_ids : [],
+        missing_fields: missingFields
       });
     }
 
@@ -731,7 +829,16 @@ export class AiService {
   }
 
   private extractTimeline(normalizedText: string): PurchaseTimeline {
-    if (this.containsAny(normalizedText, ["срочно", "сегодня", "на этой неделе", "до месяца"])) {
+    if (
+      this.containsAny(normalizedText, [
+        "срочно",
+        "сегодня",
+        "на этой неделе",
+        "на следующей неделе",
+        "на след неделе",
+        "до месяца"
+      ])
+    ) {
       return "urgent";
     }
 
@@ -884,6 +991,15 @@ export class AiService {
     return hasSelectionIntent || (hasCatalogFit && hasCoreIntent);
   }
 
+  private isShortlistReady(signals: SalesSignals, context: DecisionContext) {
+    const hasBudget = signals.budgetRub !== null;
+    const hasRooms = signals.rooms !== null;
+    const hasScenario = Boolean(signals.purpose || signals.timeline);
+    const hasUnits = context.candidateUnits.length > 0;
+
+    return hasBudget && hasRooms && hasScenario && hasUnits;
+  }
+
   private shouldUseFastPath(messageText: string, context: DecisionContext) {
     const signals = this.collectSignals(messageText, context);
 
@@ -1004,6 +1120,107 @@ export class AiService {
   private shortenReply(reply: string) {
     const paragraphs = reply.split("\n\n").filter(Boolean);
     return paragraphs.slice(0, 2).join("\n\n");
+  }
+
+  private buildKnownFactsSummary(signals: SalesSignals, context: DecisionContext) {
+    const facts: string[] = [];
+
+    if (context.activeProject?.name) {
+      facts.push(`по ${context.activeProject.name}`);
+    }
+
+    if (signals.purpose) {
+      facts.push(this.describePurposeForReply(signals.purpose));
+    }
+
+    if (signals.budgetRub) {
+      facts.push(`бюджет около ${this.formatRub(signals.budgetRub)}`);
+    }
+
+    if (signals.rooms !== null) {
+      facts.push(
+        signals.rooms === 0
+          ? "рассматриваете студию"
+          : `рассматриваете ${signals.rooms}-комнатный формат`
+      );
+    }
+
+    if (signals.timeline) {
+      facts.push(this.describeTimelineForReply(signals.timeline));
+    }
+
+    if (facts.length === 0) {
+      return "Понял контекст.";
+    }
+
+    return `Понял: ${facts.join(", ")}.`;
+  }
+
+  private isReaskingKnownInfo(replyText: string, signals: SalesSignals) {
+    const normalized = replyText.toLowerCase();
+
+    if (
+      signals.purpose &&
+      this.containsAny(normalized, [
+        "для какого сценария",
+        "для чего покупаете",
+        "для себя, семьи или инвестиций",
+        "для себя, семьи, инвестиций или родителей"
+      ])
+    ) {
+      return true;
+    }
+
+    if (
+      signals.budgetRub &&
+      this.containsAny(normalized, [
+        "какой бюджет",
+        "комфортный бюджет",
+        "какой бюджет комфортен",
+        "подскажите бюджет"
+      ])
+    ) {
+      return true;
+    }
+
+    if (
+      signals.rooms !== null &&
+      this.containsAny(normalized, [
+        "сколько комнат",
+        "какой формат",
+        "формат квартиры",
+        "какой формат нужен"
+      ])
+    ) {
+      return true;
+    }
+
+    if (
+      signals.timeline &&
+      this.containsAny(normalized, [
+        "в какие сроки",
+        "по срокам",
+        "как быстро хотите",
+        "планируете решение"
+      ])
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private describeTimelineForReply(timeline: PurchaseTimeline) {
+    switch (timeline) {
+      case "urgent":
+        return "решение нужно быстро";
+      case "soon":
+        return "горизонт решения в ближайшие 1-3 месяца";
+      case "later":
+        return "сейчас спокойно выбираете без спешки";
+      default:
+        return "срок пока не зафиксирован";
+    }
   }
 
   private normalizeForComparison(value: string) {

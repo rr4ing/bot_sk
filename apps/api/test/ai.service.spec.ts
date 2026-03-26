@@ -87,7 +87,7 @@ describe("AiService fallback sales flow", () => {
     expect(decision.intent).toBe("unit_recommendation");
     expect(decision.recommended_unit_ids).toEqual(["unit-1"]);
     expect(decision.reply_text).toContain("Бадаев");
-    expect(decision.reply_text).toContain("shortlist");
+    expect(decision.reply_text.toLowerCase()).toContain("сразу покажу");
     expect(decision.lead_score).toBeGreaterThanOrEqual(80);
   });
 
@@ -268,5 +268,158 @@ describe("AiService fallback sales flow", () => {
 
     expect(decision.reply_text).toContain("семейный сценарий понял");
     expect(decision.reply_text).not.toContain("под ваш сценарий");
+  });
+
+  it("replaces repeated qualification questions with a summary of known facts and the next missing step", async () => {
+    const service = new AiService(
+      {
+        values: {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_MODEL: "test-model"
+        },
+        languageModelApiKey: "test-key",
+        languageModelName: "test-model",
+        languageModelProvider: "openai",
+        languageModelBaseUrl: undefined
+      } as never,
+      catalog as never
+    );
+
+    (service as unknown as { client: unknown }).client = {
+      responses: {
+        create: jest.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            intent: "clarify_needs",
+            reply_text:
+              "Если говорим про Бадаевский, подскажите, для какого сценария покупаете и какой бюджет комфортен?",
+            lead_score: 47,
+            missing_fields: ["budget", "rooms", "timeline"]
+          })
+        })
+      }
+    };
+
+    const decision = await service.decide("Для семьи", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Привет" },
+        { role: "assistant", content: "Для чего покупаете?" }
+      ],
+      conversationText: "Привет\nПокупаю для семьи"
+    });
+
+    expect(decision.reply_text).toContain("для семьи");
+    expect(decision.reply_text).not.toContain("для какого сценария покупаете");
+    expect(decision.reply_text).toContain("бюджет");
+  });
+
+  it("jumps to shortlist when purpose, budget, rooms and timeline are already known", async () => {
+    const service = new AiService(
+      {
+        values: {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_MODEL: "test-model"
+        },
+        languageModelApiKey: "test-key",
+        languageModelName: "test-model",
+        languageModelProvider: "openai",
+        languageModelBaseUrl: undefined
+      } as never,
+      catalog as never
+    );
+
+    (service as unknown as { client: unknown }).client = {
+      responses: {
+        create: jest.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            intent: "clarify_needs",
+            reply_text:
+              "Чтобы подобрать точные варианты, уточните, пожалуйста, для чего покупаете и какой бюджет комфортен?",
+            lead_score: 61,
+            missing_fields: ["purpose", "budget"]
+          })
+        })
+      }
+    };
+
+    const decision = await service.decide("80 млн, 2-комнатная, для семьи, 1-3 месяца", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Интересен Бадаевский" },
+        { role: "assistant", content: "Расскажите задачу покупки." }
+      ],
+      conversationText: "Интересен Бадаевский\nПокупаю для семьи\n80 млн\n2-комнатная\n1-3 месяца"
+    });
+
+    expect(decision.intent).toBe("unit_recommendation");
+    expect(decision.recommended_unit_ids).toEqual(["unit-1"]);
+    expect(decision.reply_text.toLowerCase()).toContain("данных уже достаточно");
+    expect(decision.missing_fields).toEqual([]);
+  });
+
+  it("prefers the latest purpose, budget, rooms and timeline over older turns", async () => {
+    const service = new AiService(
+      {
+        values: {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_MODEL: "test-model"
+        },
+        languageModelApiKey: "test-key",
+        languageModelName: "test-model",
+        languageModelProvider: "openai",
+        languageModelBaseUrl: undefined
+      } as never,
+      {
+        ...catalog,
+        extractRooms: jest.fn((text: string) => {
+          const normalized = text.toLowerCase();
+          if (normalized.includes("однуш")) {
+            return 1;
+          }
+          if (normalized.includes("2 комнаты") || normalized.includes("2-комнат")) {
+            return 2;
+          }
+
+          return null;
+        })
+      } as never
+    );
+
+    (service as unknown as { client: unknown }).client = {
+      responses: {
+        create: jest.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            intent: "clarify_needs",
+            reply_text:
+              "Чтобы подобрать точные варианты, уточните, пожалуйста, для чего покупаете и какой бюджет комфортен?",
+            lead_score: 61,
+            missing_fields: ["purpose", "budget"]
+          })
+        })
+      }
+    };
+
+    const decision = await service.decide("Для себя, 80 млн, однушка, на следующей неделе", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Для семьи" },
+        { role: "user", content: "40-80 млн" },
+        { role: "user", content: "2-комнатная" }
+      ],
+      conversationText: "Для семьи\n40-80 млн\n2-комнатная\nДля себя, 80 млн, однушка, на следующей неделе"
+    });
+
+    expect(decision.intent).toBe("unit_recommendation");
+    expect(decision.reply_text).toContain("для себя");
+    expect(decision.reply_text).toContain("80");
+    expect(decision.reply_text).toContain("1-комнат");
+    expect(decision.reply_text).toContain("быстро");
+    expect(decision.missing_fields).toEqual([]);
   });
 });
