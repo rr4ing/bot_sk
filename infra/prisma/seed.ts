@@ -14,7 +14,7 @@ async function main() {
       description: "Семейный жилой квартал у парка и метро.",
       salesHeadline: "Квартиры для жизни и инвестиций рядом с метро и парком.",
       handoffPhone: "+7 900 000-00-00",
-      status: "active"
+      status: "paused"
     },
     create: {
       id: "seed-project",
@@ -24,7 +24,7 @@ async function main() {
       description: "Семейный жилой квартал у парка и метро.",
       salesHeadline: "Квартиры для жизни и инвестиций рядом с метро и парком.",
       handoffPhone: "+7 900 000-00-00",
-      status: "active"
+      status: "paused"
     }
   });
 

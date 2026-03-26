@@ -12,7 +12,9 @@ describe("TelegramService", () => {
       {
         ensureConversation: jest.fn().mockResolvedValue({ id: "conv-1" }),
         appendMessage,
-        getHistory: jest.fn().mockResolvedValue([]),
+        getHistory: jest.fn().mockResolvedValue([
+          { role: "user", content: "Нужен срочный подбор, перезвоните сегодня" }
+        ]),
         updateConversationSummary
       } as never,
       {
@@ -79,7 +81,7 @@ describe("TelegramService", () => {
       {
         ensureConversation: jest.fn().mockResolvedValue({ id: "conv-2" }),
         appendMessage: jest.fn(),
-        getHistory: jest.fn().mockResolvedValue([]),
+        getHistory: jest.fn().mockResolvedValue([{ role: "user", content: "Подберите квартиру" }]),
         updateConversationSummary: jest.fn()
       } as never,
       {
@@ -140,6 +142,85 @@ describe("TelegramService", () => {
             [{ text: "Для инвестиций" }, { text: "Для родителей" }]
           ]
         })
+      })
+    );
+  });
+
+  it("builds catalog context from conversation history, not just the latest quick reply", async () => {
+    const getRelevantProject = jest.fn().mockResolvedValue(null);
+    const findCandidateUnits = jest.fn().mockResolvedValue([]);
+    const getRelevantDocuments = jest.fn().mockResolvedValue([]);
+    const decide = jest.fn().mockResolvedValue({
+      intent: "clarify_needs",
+      reply_text: "Уточню еще пару деталей.",
+      recommended_unit_ids: [],
+      lead_score: 40,
+      handoff_required: false,
+      support_ticket_required: false,
+      missing_fields: ["rooms", "timeline"],
+      policy_flags: []
+    });
+
+    const service = new TelegramService(
+      {
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-3" }),
+        appendMessage: jest.fn(),
+        getHistory: jest.fn().mockResolvedValue([
+          { role: "user", content: "Интересен Бадаевский" },
+          { role: "assistant", content: "Для чего рассматриваете покупку?" },
+          { role: "user", content: "Для инвестиций" },
+          { role: "user", content: "До 20 млн" }
+        ]),
+        updateConversationSummary: jest.fn()
+      } as never,
+      {
+        getRelevantProject,
+        findCandidateUnits,
+        extractBudget: jest.fn().mockReturnValue(null),
+        extractRooms: jest.fn().mockReturnValue(null)
+      } as never,
+      {
+        getRelevantDocuments
+      } as never,
+      {
+        decide
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage: jest.fn()
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    await service.handleIncomingUpdate({
+      update_id: 3,
+      message: {
+        message_id: 3,
+        date: Date.now(),
+        text: "До 20 млн",
+        chat: { id: 30, type: "private" },
+        from: { id: 40, is_bot: false, first_name: "Олег" }
+      }
+    });
+
+    expect(getRelevantProject).toHaveBeenCalledWith(expect.stringContaining("Бадаевский"));
+    expect(findCandidateUnits).toHaveBeenCalledWith(expect.stringContaining("Для инвестиций"));
+    expect(getRelevantDocuments).toHaveBeenCalledWith(expect.stringContaining("До 20 млн"));
+    expect(decide).toHaveBeenCalledWith(
+      "До 20 млн",
+      expect.objectContaining({
+        conversationText: expect.stringContaining("Бадаевский")
       })
     );
   });

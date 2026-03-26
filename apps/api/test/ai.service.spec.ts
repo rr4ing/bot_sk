@@ -105,4 +105,40 @@ describe("AiService fallback sales flow", () => {
     expect(decision.missing_fields).toContain("phone");
     expect(decision.reply_text).toContain("контакт");
   });
+
+  it("does not recommend units on a plain greeting", async () => {
+    const service = new AiService(env as never, catalog as never);
+
+    const decision = await service.decide("Привет", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [{ role: "user", content: "Привет" }],
+      conversationText: "Привет"
+    });
+
+    expect(decision.intent).toBe("sales_qualification");
+    expect(decision.recommended_unit_ids).toEqual([]);
+    expect(decision.reply_text).toContain("для чего покупаете");
+  });
+
+  it("asks the next question after a purpose-only quick reply instead of repeating a project pitch", async () => {
+    const service = new AiService(env as never, catalog as never);
+
+    const decision = await service.decide("Для инвестиций", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Интересен Бадаевский" },
+        { role: "assistant", content: "Для чего рассматриваете покупку?" },
+        { role: "user", content: "Для инвестиций" }
+      ],
+      conversationText: "Интересен Бадаевский\nДля инвестиций"
+    });
+
+    expect(decision.recommended_unit_ids).toEqual([]);
+    expect(decision.reply_text).toContain("бюджет");
+    expect(decision.reply_text).toContain("какой формат");
+  });
 });

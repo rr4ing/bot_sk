@@ -30,4 +30,5 @@ export interface DecisionContext {
   candidateUnits: Unit[];
   knowledgeDocuments: KnowledgeDocument[];
   history: Array<{ role: "user" | "assistant"; content: string }>;
+  conversationText?: string;
 }

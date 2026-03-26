@@ -47,18 +47,21 @@ export class TelegramService {
 
     await this.conversations.appendMessage(conversation.id, "user", messageText, update);
 
-    const [activeProject, candidateUnits, knowledgeDocuments, history] = await Promise.all([
-      this.catalog.getRelevantProject(messageText),
-      this.catalog.findCandidateUnits(messageText),
-      this.knowledge.getRelevantDocuments(messageText),
-      this.conversations.getHistory(conversation.id)
+    const history = await this.conversations.getHistory(conversation.id);
+    const conversationText = this.buildDecisionText(history);
+
+    const [activeProject, candidateUnits, knowledgeDocuments] = await Promise.all([
+      this.catalog.getRelevantProject(conversationText),
+      this.catalog.findCandidateUnits(conversationText),
+      this.knowledge.getRelevantDocuments(conversationText)
     ]);
 
     const decision = await this.ai.decide(messageText, {
       activeProject,
       candidateUnits,
       knowledgeDocuments,
-      history
+      history,
+      conversationText
     });
     const safeDecision = this.policy.enforce(decision, candidateUnits);
 
@@ -197,5 +200,13 @@ export class TelegramService {
     return {
       remove_keyboard: false
     };
+  }
+
+  private buildDecisionText(history: Array<{ role: "user" | "assistant"; content: string }>) {
+    return history
+      .filter((entry) => entry.role === "user")
+      .slice(-8)
+      .map((entry) => entry.content)
+      .join("\n");
   }
 }

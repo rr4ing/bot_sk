@@ -14,6 +14,11 @@ interface SalesSignals {
   rooms: number | null;
   purpose: PurchasePurpose;
   timeline: PurchaseTimeline;
+  isGreeting: boolean;
+  isPurposeOnly: boolean;
+  isBudgetOnly: boolean;
+  isRoomsOnly: boolean;
+  isShortReply: boolean;
   wantsManager: boolean;
   wantsProjectOverview: boolean;
   wantsPriceAnswer: boolean;
@@ -49,7 +54,7 @@ export class AiService {
 
   async decide(messageText: string, context: DecisionContext): Promise<AIDecision> {
     if (!this.client) {
-      return this.fallbackDecision(messageText, context);
+      return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
     }
 
     const signals = this.collectSignals(messageText, context);
@@ -127,10 +132,11 @@ export class AiService {
 
       const rawText = (response as { output_text?: string }).output_text ?? "";
       const json = this.extractJson(rawText);
-      return aiDecisionSchema.parse(JSON.parse(json));
+      const decision = aiDecisionSchema.parse(JSON.parse(json));
+      return this.normalizeDecision(messageText, context, decision);
     } catch (error) {
       this.logger.error("OpenAI Responses API failed, switching to fallback mode", error as Error);
-      return this.fallbackDecision(messageText, context);
+      return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
     }
   }
 
@@ -319,14 +325,41 @@ export class AiService {
   }
 
   private collectSignals(messageText: string, context: DecisionContext): SalesSignals {
-    const transcript = this.buildConversationText(messageText, context);
+    const transcript = context.conversationText?.trim()
+      ? context.conversationText
+      : this.buildConversationText(messageText, context);
     const normalized = transcript.toLowerCase();
+    const currentNormalized = messageText.toLowerCase().trim();
+    const budgetRub = this.catalog.extractBudget(transcript);
+    const rooms = this.catalog.extractRooms(transcript);
+    const purpose = this.extractPurpose(normalized);
+    const timeline = this.extractTimeline(normalized);
+    const isGreeting = this.isGreetingMessage(currentNormalized);
+    const isShortReply = currentNormalized.length <= 24 && !/\d{6,}/.test(currentNormalized);
+    const isPurposeOnly =
+      this.extractPurpose(currentNormalized) !== null &&
+      this.catalog.extractBudget(currentNormalized) === null &&
+      this.catalog.extractRooms(currentNormalized) === null &&
+      this.extractTimeline(currentNormalized) === null;
+    const isBudgetOnly =
+      this.catalog.extractBudget(currentNormalized) !== null &&
+      this.catalog.extractRooms(currentNormalized) === null &&
+      this.extractPurpose(currentNormalized) === null;
+    const isRoomsOnly =
+      this.catalog.extractRooms(currentNormalized) !== null &&
+      this.catalog.extractBudget(currentNormalized) === null &&
+      this.extractPurpose(currentNormalized) === null;
 
     return {
-      budgetRub: this.catalog.extractBudget(transcript),
-      rooms: this.catalog.extractRooms(transcript),
-      purpose: this.extractPurpose(normalized),
-      timeline: this.extractTimeline(normalized),
+      budgetRub,
+      rooms,
+      purpose,
+      timeline,
+      isGreeting,
+      isPurposeOnly,
+      isBudgetOnly,
+      isRoomsOnly,
+      isShortReply,
       wantsManager: this.containsAny(normalized, [
         "менеджер",
         "свяжите",
@@ -407,6 +440,108 @@ export class AiService {
     ].join("\n");
   }
 
+  private normalizeDecision(
+    messageText: string,
+    context: DecisionContext,
+    decision: AIDecision
+  ): AIDecision {
+    const signals = this.collectSignals(messageText, context);
+    const canRecommendUnits = this.canRecommendUnits(signals);
+
+    if (signals.isGreeting && !signals.wantsProjectOverview) {
+      return aiDecisionSchema.parse({
+        intent: "sales_qualification",
+        reply_text:
+          "Помогу подобрать квартиру и не буду грузить лишним. Для начала подскажите, для чего покупаете: для себя, семьи или инвестиций?",
+        recommended_unit_ids: [],
+        lead_score: 28,
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: ["purpose", "budget", "rooms", "timeline"],
+        policy_flags: []
+      });
+    }
+
+    if (signals.isPurposeOnly) {
+      return aiDecisionSchema.parse({
+        intent: "sales_qualification",
+        reply_text: `Понял, рассматриваете покупку ${this.describePurposeForReply(
+          signals.purpose
+        )}. Тогда следующий шаг такой: подскажите комфортный бюджет и какой формат хотите смотреть — 1, 2 или 3 комнаты+?`,
+        recommended_unit_ids: [],
+        lead_score: Math.max(decision.lead_score, 42),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: this.dedupeMissingFields(["budget", "rooms", "timeline"]),
+        policy_flags: []
+      });
+    }
+
+    if (signals.isBudgetOnly) {
+      return aiDecisionSchema.parse({
+        intent: "clarify_needs",
+        reply_text:
+          "Отлично, бюджет понял. Теперь быстро сузим подбор: сколько комнат рассматриваете и покупка нужна в ближайшее время или можно спокойно выбирать?",
+        recommended_unit_ids: [],
+        lead_score: Math.max(decision.lead_score, 46),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: this.dedupeMissingFields(["rooms", "timeline", "purpose"]),
+        policy_flags: []
+      });
+    }
+
+    if (signals.isRoomsOnly) {
+      return aiDecisionSchema.parse({
+        intent: "clarify_needs",
+        reply_text:
+          "Формат понял. Чтобы не стрелять мимо, подскажите ещё ориентир по бюджету и это покупка для жизни, семьи или инвестиции?",
+        recommended_unit_ids: [],
+        lead_score: Math.max(decision.lead_score, 46),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: this.dedupeMissingFields(["budget", "purpose", "timeline"]),
+        policy_flags: []
+      });
+    }
+
+    if (
+      !canRecommendUnits &&
+      decision.recommended_unit_ids.length > 0 &&
+      !signals.wantsCallback &&
+      !signals.wantsManager &&
+      decision.intent !== "clarify_needs" &&
+      decision.intent !== "handoff_manager"
+    ) {
+      return aiDecisionSchema.parse({
+        ...decision,
+        intent: "sales_qualification",
+        reply_text:
+          "Чтобы показать действительно подходящие варианты, сначала уточню пару опорных вещей: для чего покупаете, какой бюджет комфортен и сколько комнат рассматриваете?",
+        recommended_unit_ids: [],
+        missing_fields: this.dedupeMissingFields(
+          decision.missing_fields.length > 0
+            ? decision.missing_fields
+            : ["purpose", "budget", "rooms", "timeline"]
+        )
+      });
+    }
+
+    if (
+      signals.isShortReply &&
+      !signals.wantsSelection &&
+      !signals.wantsPriceAnswer &&
+      decision.reply_text.length > 320
+    ) {
+      return aiDecisionSchema.parse({
+        ...decision,
+        reply_text: this.shortenReply(decision.reply_text)
+      });
+    }
+
+    return decision;
+  }
+
   private extractPurpose(normalizedText: string): PurchasePurpose {
     if (this.containsAny(normalizedText, ["инвест", "сдач", "ликвидн"])) {
       return "investment";
@@ -445,6 +580,20 @@ export class AiService {
 
   private containsAny(normalizedText: string, tokens: string[]) {
     return tokens.some((token) => normalizedText.includes(token));
+  }
+
+  private isGreetingMessage(normalizedText: string) {
+    const compact = normalizedText.replace(/[!?.\s]+/g, " ").trim();
+    return [
+      "привет",
+      "здравствуйте",
+      "добрый день",
+      "добрый вечер",
+      "доброе утро",
+      "хай",
+      "hello",
+      "hi"
+    ].includes(compact);
   }
 
   private buildMissingFields(
@@ -553,5 +702,37 @@ export class AiService {
 
   private formatRub(value: number) {
     return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
+  }
+
+  private canRecommendUnits(signals: SalesSignals) {
+    const hasCoreIntent = Boolean(signals.purpose || signals.timeline);
+    const hasSelectionIntent = signals.wantsSelection || signals.wantsPriceAnswer;
+    const hasCatalogFit = signals.budgetRub !== null || signals.rooms !== null;
+
+    return hasSelectionIntent || (hasCatalogFit && hasCoreIntent);
+  }
+
+  private describePurposeForReply(purpose: PurchasePurpose) {
+    switch (purpose) {
+      case "investment":
+        return "под инвестицию";
+      case "family":
+        return "для семьи";
+      case "parents":
+        return "для родителей";
+      case "self":
+        return "для себя";
+      default:
+        return "под ваш сценарий";
+    }
+  }
+
+  private dedupeMissingFields(fields: AIDecision["missing_fields"]) {
+    return Array.from(new Set(fields));
+  }
+
+  private shortenReply(reply: string) {
+    const paragraphs = reply.split("\n\n").filter(Boolean);
+    return paragraphs.slice(0, 2).join("\n\n");
   }
 }
