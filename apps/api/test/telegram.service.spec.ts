@@ -221,6 +221,72 @@ describe("TelegramService", () => {
     );
   });
 
+  it("ignores duplicate telegram updates with the same update_id", async () => {
+    const sendMessage = jest.fn();
+    const service = new TelegramService(
+      {
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-dup" }),
+        appendMessage: jest.fn(),
+        getHistory: jest.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
+        updateConversationSummary: jest.fn()
+      } as never,
+      {
+        getRelevantProject: jest.fn().mockResolvedValue(null),
+        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        extractBudget: jest.fn().mockReturnValue(null),
+        extractRooms: jest.fn().mockReturnValue(null)
+      } as never,
+      {
+        getRelevantDocuments: jest.fn().mockResolvedValue([])
+      } as never,
+      {
+        decide: jest.fn().mockResolvedValue({
+          intent: "sales_qualification",
+          reply_text: "Здравствуйте! Для чего покупаете?",
+          recommended_unit_ids: [],
+          lead_score: 40,
+          handoff_required: false,
+          support_ticket_required: false,
+          missing_fields: ["purpose"],
+          policy_flags: []
+        })
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    const update = {
+      update_id: 99,
+      message: {
+        message_id: 99,
+        date: Date.now(),
+        text: "Привет",
+        chat: { id: 99, type: "private" },
+        from: { id: 199, is_bot: false, first_name: "Нина" }
+      }
+    };
+
+    await service.handleIncomingUpdate(update);
+    await service.handleIncomingUpdate(update);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("builds catalog context from conversation history, not just the latest quick reply", async () => {
     const getRelevantProject = jest.fn().mockResolvedValue(null);
     const findCandidateUnits = jest.fn().mockResolvedValue([]);

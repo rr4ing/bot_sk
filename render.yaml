@@ -22,7 +22,7 @@ services:
       - key: AI_PROVIDER
         sync: false
       - key: TELEGRAM_TRANSPORT
-        value: polling
+        value: webhook
       - key: OPENAI_MODEL
         sync: false
       - key: OPENAI_BASE_URL

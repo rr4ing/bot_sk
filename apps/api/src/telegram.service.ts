@@ -16,6 +16,8 @@ import { JobQueueService } from "./job-queue.service";
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
+  private readonly processedUpdates = new Map<number, number>();
+  private readonly processedUpdateTtlMs = 10 * 60 * 1000;
 
   constructor(
     private readonly conversations: ConversationService,
@@ -32,6 +34,11 @@ export class TelegramService {
   async handleIncomingUpdate(update: TelegramUpdate) {
     if (!update.message?.text && !update.message?.contact) {
       return { status: "ignored", reason: "unsupported_update" };
+    }
+
+    if (this.isDuplicateUpdate(update.update_id)) {
+      this.logger.warn(`Skipping duplicate telegram update ${update.update_id}`);
+      return { status: "ignored", reason: "duplicate_update" };
     }
 
     const conversation = await this.conversations.ensureConversation(update);
@@ -229,6 +236,23 @@ export class TelegramService {
     return {
       remove_keyboard: false
     };
+  }
+
+  private isDuplicateUpdate(updateId: number) {
+    const now = Date.now();
+
+    for (const [knownUpdateId, timestamp] of this.processedUpdates.entries()) {
+      if (now - timestamp > this.processedUpdateTtlMs) {
+        this.processedUpdates.delete(knownUpdateId);
+      }
+    }
+
+    if (this.processedUpdates.has(updateId)) {
+      return true;
+    }
+
+    this.processedUpdates.set(updateId, now);
+    return false;
   }
 
   private buildDecisionText(history: Array<{ role: "user" | "assistant"; content: string }>) {
