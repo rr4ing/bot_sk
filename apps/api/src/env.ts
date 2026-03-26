@@ -10,6 +10,7 @@ const envSchema = z.object({
   QUEUE_MODE: z.enum(["redis", "inline"]).default("redis"),
   AI_PROVIDER: z.enum(["auto", "openai", "xai"]).default("auto"),
   OPENAI_API_KEY: z.string().optional(),
+  OPENAI_BASE_URL: z.string().url().optional(),
   OPENAI_MODEL: z.string().default("gpt-5-mini"),
   OPENAI_EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   XAI_API_KEY: z.string().optional(),
@@ -90,7 +91,7 @@ export class EnvService {
       return this.values.XAI_BASE_URL;
     }
 
-    return undefined;
+    return this.values.OPENAI_BASE_URL;
   }
 
   get languageModelEnabled() {

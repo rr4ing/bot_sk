@@ -66,8 +66,13 @@ npm run dev:admin
 ## AI-провайдеры
 
 - Для чата можно использовать `OpenAI` или `xAI Grok`.
+- Для OpenAI-compatible провайдеров можно задать `OPENAI_BASE_URL`.
 - Если `AI_PROVIDER=auto`, приоритет такой:
   - `XAI_API_KEY` -> `Grok`
   - `OPENAI_API_KEY` -> `OpenAI`
   - если ключей нет, включается локальный fallback-режим
 - Embeddings пока остаются на `OPENAI_API_KEY`; если его нет, используется локальный fallback-вектор для демо.
+- Для `Groq` можно использовать:
+  - `AI_PROVIDER=openai`
+  - `OPENAI_BASE_URL=https://api.groq.com/openai/v1`
+  - `OPENAI_MODEL=llama-3.3-70b-versatile`

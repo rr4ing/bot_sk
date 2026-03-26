@@ -40,7 +40,9 @@ export class AiService {
     this.client = this.env.languageModelApiKey
       ? new OpenAI({
           apiKey: this.env.languageModelApiKey,
-          baseURL: this.env.languageModelBaseUrl
+          ...(this.env.languageModelBaseUrl
+            ? { baseURL: this.env.languageModelBaseUrl }
+            : {})
         })
       : null;
   }

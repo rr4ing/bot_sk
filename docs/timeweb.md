@@ -17,6 +17,7 @@
 - `QUEUE_MODE`
 - `AI_PROVIDER=auto|openai|xai`
 - `OPENAI_API_KEY`
+- `OPENAI_BASE_URL` (опционально для OpenAI-compatible провайдеров вроде Groq)
 - `OPENAI_MODEL=gpt-5-mini`
 - `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`
 - `XAI_API_KEY`
