@@ -181,4 +181,48 @@ describe("AiService fallback sales flow", () => {
     expect(decision.missing_fields).toContain("budget");
     expect(decision.missing_fields).toContain("purpose");
   });
+
+  it("fills missing boolean flags from model output instead of crashing on partial JSON", async () => {
+    const service = new AiService(
+      {
+        values: {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_MODEL: "test-model"
+        },
+        languageModelApiKey: "test-key",
+        languageModelName: "test-model",
+        languageModelProvider: "openai",
+        languageModelBaseUrl: undefined
+      } as never,
+      catalog as never
+    );
+
+    (service as unknown as { client: unknown }).client = {
+      responses: {
+        create: jest.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            intent: "clarify_needs",
+            reply_text: "Уточню ещё пару деталей.",
+            lead_score: 45,
+            missing_fields: ["budget", "rooms"]
+          })
+        })
+      }
+    };
+
+    const decision = await service.decide("Для себя", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Бадаевский" },
+        { role: "assistant", content: "Подскажите сценарий покупки." }
+      ],
+      conversationText: "Бадаевский\nДля себя"
+    });
+
+    expect(decision.intent).toBe("sales_qualification");
+    expect(decision.handoff_required).toBe(false);
+    expect(decision.support_ticket_required).toBe(false);
+  });
 });

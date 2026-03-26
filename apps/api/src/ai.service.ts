@@ -63,6 +63,12 @@ function loadSystemPromptFromFile() {
 
 const BASE_SYSTEM_PROMPT = loadSystemPromptFromFile();
 
+const aiDecisionLooseSchema = aiDecisionSchema.partial().extend({
+  intent: aiDecisionSchema.shape.intent,
+  reply_text: aiDecisionSchema.shape.reply_text,
+  lead_score: aiDecisionSchema.shape.lead_score
+});
+
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
@@ -165,7 +171,7 @@ export class AiService {
 
       const rawText = (response as { output_text?: string }).output_text ?? "";
       const json = this.extractJson(rawText);
-      const decision = aiDecisionSchema.parse(JSON.parse(json));
+      const decision = this.parseModelDecision(JSON.parse(json));
       return this.normalizeDecision(messageText, context, decision);
     } catch (error) {
       this.logger.error("OpenAI Responses API failed, switching to fallback mode", error as Error);
@@ -406,6 +412,19 @@ export class AiService {
     }
 
     return rawText.slice(start, end + 1);
+  }
+
+  private parseModelDecision(payload: unknown): AIDecision {
+    const looseDecision = aiDecisionLooseSchema.parse(payload);
+
+    return aiDecisionSchema.parse({
+      recommended_unit_ids: [],
+      handoff_required: false,
+      support_ticket_required: false,
+      missing_fields: [],
+      policy_flags: [],
+      ...looseDecision
+    });
   }
 
   private collectSignals(messageText: string, context: DecisionContext): SalesSignals {
