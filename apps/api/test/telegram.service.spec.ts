@@ -362,10 +362,10 @@ describe("TelegramService", () => {
       expect.stringContaining("Покупаю для инвестиций")
     );
     expect(getRelevantDocuments).toHaveBeenCalledWith(expect.stringContaining("Бюджет до 20 млн"));
-    expect(decide).not.toHaveBeenCalled();
-    expect(sendMessage).toHaveBeenCalledWith(
+    expect(decide).toHaveBeenCalledWith(
+      "Бюджет до 20 млн",
       expect.objectContaining({
-        text: expect.stringContaining("сколько комнат")
+        conversationText: expect.stringContaining("Бадаевский")
       })
     );
   });

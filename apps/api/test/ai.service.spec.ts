@@ -221,8 +221,52 @@ describe("AiService fallback sales flow", () => {
       conversationText: "Бадаевский\nДля себя"
     });
 
-    expect(decision.intent).toBe("sales_qualification");
+    expect(decision.intent).toBe("clarify_needs");
     expect(decision.handoff_required).toBe(false);
     expect(decision.support_ticket_required).toBe(false);
+  });
+
+  it("does not overwrite a valid model reply for a short purpose answer with fallback template text", async () => {
+    const service = new AiService(
+      {
+        values: {
+          OPENAI_API_KEY: "test-key",
+          OPENAI_MODEL: "test-model"
+        },
+        languageModelApiKey: "test-key",
+        languageModelName: "test-model",
+        languageModelProvider: "openai",
+        languageModelBaseUrl: undefined
+      } as never,
+      catalog as never
+    );
+
+    (service as unknown as { client: unknown }).client = {
+      responses: {
+        create: jest.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            intent: "clarify_needs",
+            reply_text:
+              "Отлично, семейный сценарий понял. Тогда подскажите, какой бюджет комфортен и рассматриваете ли 1-комнатный или 2-комнатный формат?",
+            lead_score: 48,
+            missing_fields: ["budget", "rooms", "timeline"]
+          })
+        })
+      }
+    };
+
+    const decision = await service.decide("Для семьи", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Привет" },
+        { role: "assistant", content: "Для чего покупаете?" }
+      ],
+      conversationText: "Привет\nПокупаю для семьи"
+    });
+
+    expect(decision.reply_text).toContain("семейный сценарий понял");
+    expect(decision.reply_text).not.toContain("под ваш сценарий");
   });
 });

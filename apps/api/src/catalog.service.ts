@@ -189,6 +189,18 @@ export class CatalogService {
       return 0;
     }
 
+    if (["однуш", "евро-2", "евродвуш"].some((token) => normalized.includes(token))) {
+      return 1;
+    }
+
+    if (["двуш", "евро-3", "евротреш"].some((token) => normalized.includes(token))) {
+      return 2;
+    }
+
+    if (["треш", "трёш", "евро-4"].some((token) => normalized.includes(token))) {
+      return 3;
+    }
+
     const match = normalized.match(/([1-5])\s*[- ]?\s*(к|комн|комнат)/);
     if (match) {
       return Number(match[1]);

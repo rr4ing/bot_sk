@@ -89,10 +89,6 @@ export class AiService {
   }
 
   async decide(messageText: string, context: DecisionContext): Promise<AIDecision> {
-    if (this.shouldUseFastPath(messageText, context)) {
-      return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
-    }
-
     if (!this.client) {
       return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
     }
@@ -172,7 +168,7 @@ export class AiService {
       const rawText = (response as { output_text?: string }).output_text ?? "";
       const json = this.extractJson(rawText);
       const decision = this.parseModelDecision(JSON.parse(json));
-      return this.normalizeDecision(messageText, context, decision);
+      return this.normalizeDecision(messageText, context, decision, true);
     } catch (error) {
       this.logger.error("OpenAI Responses API failed, switching to fallback mode", error as Error);
       return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
@@ -564,7 +560,8 @@ export class AiService {
   private normalizeDecision(
     messageText: string,
     context: DecisionContext,
-    decision: AIDecision
+    decision: AIDecision,
+    fromModel = false
   ): AIDecision {
     const signals = this.collectSignals(messageText, context);
     const canRecommendUnits = this.canRecommendUnits(signals);
@@ -577,7 +574,7 @@ export class AiService {
       .filter((entry) => entry.role === "assistant")
       .at(-1)?.content;
 
-    if (signals.isGreeting && !signals.wantsProjectOverview) {
+    if (!fromModel && signals.isGreeting && !signals.wantsProjectOverview) {
       return aiDecisionSchema.parse({
         intent: "sales_qualification",
         reply_text:
@@ -591,7 +588,7 @@ export class AiService {
       });
     }
 
-    if (signals.isPurposeOnly) {
+    if (!fromModel && signals.isPurposeOnly) {
       return aiDecisionSchema.parse({
         intent: "sales_qualification",
         reply_text: `Понял, рассматриваете покупку ${this.describePurposeForReply(
@@ -606,7 +603,7 @@ export class AiService {
       });
     }
 
-    if (signals.isBudgetOnly) {
+    if (!fromModel && signals.isBudgetOnly) {
       return aiDecisionSchema.parse({
         intent: "clarify_needs",
         reply_text: `Отлично, бюджет понял. ${guidedQuestion}`,
@@ -619,7 +616,7 @@ export class AiService {
       });
     }
 
-    if (signals.isRoomsOnly) {
+    if (!fromModel && signals.isRoomsOnly) {
       return aiDecisionSchema.parse({
         intent: "clarify_needs",
         reply_text: `Формат понял. ${guidedQuestion}`,
@@ -632,7 +629,7 @@ export class AiService {
       });
     }
 
-    if (signals.isTimelineOnly && !signals.wantsCallback && !signals.wantsManager) {
+    if (!fromModel && signals.isTimelineOnly && !signals.wantsCallback && !signals.wantsManager) {
       return aiDecisionSchema.parse({
         intent: "clarify_needs",
         reply_text: `По сроку понял. ${guidedQuestion}`,

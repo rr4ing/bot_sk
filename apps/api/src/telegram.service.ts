@@ -66,24 +66,14 @@ export class TelegramService {
       this.knowledge.getRelevantDocuments(conversationText)
     ]);
     const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit);
-    const directDecision = this.buildStructuredReplyDecision(
-      normalizedMessageText,
-      conversationText,
+    const decision = await this.ai.decide(normalizedMessageText, {
       activeProject,
-      decisionUnits,
+      candidateUnits: decisionUnits,
       projectEntryUnit,
-      phone
-    );
-    const decision =
-      directDecision ??
-      (await this.ai.decide(normalizedMessageText, {
-        activeProject,
-        candidateUnits: decisionUnits,
-        projectEntryUnit,
-        knowledgeDocuments,
-        history,
-        conversationText
-      }));
+      knowledgeDocuments,
+      history,
+      conversationText
+    });
     const safeDecision = this.policy.enforce(decision, decisionUnits);
 
     await this.conversations.appendMessage(
