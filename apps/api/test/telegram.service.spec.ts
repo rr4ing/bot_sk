@@ -76,7 +76,7 @@ describe("TelegramService", () => {
     );
   });
 
-  it("offers purpose quick replies before generic qualification", async () => {
+  it("sends plain text responses without telegram reply keyboards", async () => {
     const sendMessage = jest.fn();
     const service = new TelegramService(
       {
@@ -138,87 +138,10 @@ describe("TelegramService", () => {
 
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        replyMarkup: expect.objectContaining({
-          keyboard: [
-            [{ text: "Для себя" }, { text: "Для семьи" }],
-            [{ text: "Для инвестиций" }, { text: "Для родителей" }]
-          ]
-        })
+        text: expect.any(String)
       })
     );
-  });
-
-  it("shows action buttons after qualification when core data is already collected", async () => {
-    const sendMessage = jest.fn();
-    const service = new TelegramService(
-      {
-        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-4" }),
-        appendMessage: jest.fn(),
-        getHistory: jest.fn().mockResolvedValue([{ role: "user", content: "Хочу подбор" }]),
-        updateConversationSummary: jest.fn()
-      } as never,
-      {
-        getRelevantProject: jest.fn().mockResolvedValue(null),
-        findCandidateUnits: jest.fn().mockResolvedValue([]),
-        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
-        extractBudget: jest.fn().mockReturnValue(20000000),
-        extractRooms: jest.fn().mockReturnValue(2)
-      } as never,
-      {
-        getRelevantDocuments: jest.fn().mockResolvedValue([])
-      } as never,
-      {
-        decide: jest.fn().mockResolvedValue({
-          intent: "unit_recommendation",
-          reply_text: "Подобрал варианты.",
-          recommended_unit_ids: [],
-          lead_score: 65,
-          handoff_required: false,
-          support_ticket_required: false,
-          missing_fields: [],
-          policy_flags: []
-        })
-      } as never,
-      {
-        enforce: jest.fn((decision) => decision)
-      } as never,
-      {
-        sendMessage
-      } as never,
-      {
-        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
-      } as never,
-      {
-        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
-      } as never,
-      {
-        enqueueManagerNotification: jest.fn(),
-        enqueueKnowledgeEmbedding: jest.fn()
-      } as never
-    );
-
-    await service.handleIncomingUpdate({
-      update_id: 4,
-      message: {
-        message_id: 4,
-        date: Date.now(),
-        text: "Покажи варианты",
-        chat: { id: 40, type: "private" },
-        from: { id: 50, is_bot: false, first_name: "Лев" }
-      }
-    });
-
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replyMarkup: expect.objectContaining({
-          keyboard: [
-            [{ text: "Подобрать 3 варианта" }, { text: "Сравнить варианты" }],
-            [{ text: "Самый выгодный вход" }, { text: "Хочу скидку" }],
-            [{ text: "Связаться с менеджером" }]
-          ]
-        })
-      })
-    );
+    expect(sendMessage.mock.calls[0][0].replyMarkup).toBeUndefined();
   });
 
   it("ignores duplicate telegram updates with the same update_id", async () => {

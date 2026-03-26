@@ -139,92 +139,12 @@ export class TelegramService {
 
     await this.telegramClient.sendMessage({
       chatId: String(update.message?.chat.id),
-      text: safeDecision.reply_text,
-      replyMarkup: this.buildReplyKeyboard(safeDecision.missing_fields, safeDecision.intent)
+      text: safeDecision.reply_text
     });
 
     return {
       status: "processed",
       decision: safeDecision
-    };
-  }
-
-  private buildReplyKeyboard(missingFields: string[], intent: string) {
-    const orderedFields = ["phone", "purpose", "budget", "rooms", "timeline"] as const;
-    const nextField = orderedFields.find((field) => missingFields.includes(field));
-
-    if (nextField === "phone") {
-      return {
-        keyboard: [
-          [{ text: "Отправить контакт", request_contact: true }],
-          [{ text: "Напишу номер сообщением" }]
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: true
-      };
-    }
-
-    if (nextField === "purpose") {
-      return {
-        keyboard: [
-          [{ text: "Для себя" }, { text: "Для семьи" }],
-          [{ text: "Для инвестиций" }, { text: "Для родителей" }]
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: true
-      };
-    }
-
-    if (nextField === "budget") {
-      return {
-        keyboard: [
-          [{ text: "до 20 млн" }, { text: "20-40 млн" }],
-          [{ text: "40-80 млн" }, { text: "80+ млн" }]
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: true
-      };
-    }
-
-    if (nextField === "rooms") {
-      return {
-        keyboard: [
-          [{ text: "Студия" }, { text: "1-комнатная" }],
-          [{ text: "2-комнатная" }, { text: "3-комнатная+" }]
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: true
-      };
-    }
-
-    if (nextField === "timeline") {
-      return {
-        keyboard: [
-          [{ text: "Срочно, до месяца" }, { text: "1-3 месяца" }],
-          [{ text: "3-6 месяцев" }, { text: "Пока присматриваюсь" }]
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: true
-      };
-    }
-
-    if (
-      !nextField &&
-      ["sales_qualification", "clarify_needs", "unit_recommendation"].includes(intent)
-    ) {
-      return {
-        keyboard: [
-          [{ text: "Подобрать 3 варианта" }, { text: "Сравнить варианты" }],
-          [{ text: "Самый выгодный вход" }, { text: "Хочу скидку" }],
-          [{ text: "Связаться с менеджером" }]
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: false
-      };
-    }
-
-    return {
-      remove_keyboard: false
     };
   }
 
