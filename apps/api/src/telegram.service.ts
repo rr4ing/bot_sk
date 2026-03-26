@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { LEAD_HOT_THRESHOLD } from "@builderbot/config";
-import { Unit } from "@prisma/client";
+import { Unit, Project } from "@prisma/client";
+import type { AIDecision } from "@builderbot/domain";
 import { TelegramUpdate } from "./types";
 import { ConversationService } from "./conversation.service";
 import { CatalogService } from "./catalog.service";
@@ -58,15 +59,24 @@ export class TelegramService {
       this.knowledge.getRelevantDocuments(conversationText)
     ]);
     const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit);
-
-    const decision = await this.ai.decide(normalizedMessageText, {
+    const directDecision = this.buildStructuredReplyDecision(
+      normalizedMessageText,
+      conversationText,
       activeProject,
-      candidateUnits: decisionUnits,
+      decisionUnits,
       projectEntryUnit,
-      knowledgeDocuments,
-      history,
-      conversationText
-    });
+      phone
+    );
+    const decision =
+      directDecision ??
+      (await this.ai.decide(normalizedMessageText, {
+        activeProject,
+        candidateUnits: decisionUnits,
+        projectEntryUnit,
+        knowledgeDocuments,
+        history,
+        conversationText
+      }));
     const safeDecision = this.policy.enforce(decision, decisionUnits);
 
     await this.conversations.appendMessage(
@@ -268,5 +278,379 @@ export class TelegramService {
     };
 
     return exactMatches[normalized] ?? compact;
+  }
+
+  private buildStructuredReplyDecision(
+    messageText: string,
+    conversationText: string,
+    activeProject: Project | null,
+    candidateUnits: Unit[],
+    projectEntryUnit: Unit | null,
+    phone: string | null
+  ): AIDecision | null {
+    const normalized = messageText.toLowerCase().trim();
+    const profile = this.extractConversationProfile(conversationText, phone);
+    const missingFields = this.buildMissingFields(profile);
+    const projectName = activeProject?.name ?? "проект";
+
+    if (this.isGreetingSignal(normalized)) {
+      return {
+        intent: "sales_qualification",
+        reply_text: `Здравствуйте! Помогу с подбором квартиры${activeProject ? ` в ${projectName}` : ""}. Для начала подскажите, для чего покупаете: для себя, семьи или под инвестицию?`,
+        recommended_unit_ids: [],
+        lead_score: 28,
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: missingFields.length ? missingFields : ["purpose", "budget", "rooms", "timeline"],
+        policy_flags: []
+      };
+    }
+
+    if (this.isPurposeSignal(normalized) || this.isBudgetSignal(normalized) || this.isRoomsSignal(normalized) || this.isTimelineSignal(normalized)) {
+      const intent = missingFields.length <= 2 ? "clarify_needs" : "sales_qualification";
+
+      if (this.isBudgetSignal(normalized) && activeProject && projectEntryUnit && profile.budgetRub && profile.budgetRub < projectEntryUnit.priceRub) {
+        return {
+          intent: "clarify_needs",
+          reply_text: `Бюджет понял. Скажу честно: если говорим про ${projectName}, текущий публичный вход начинается примерно от ${this.formatRub(projectEntryUnit.priceRub)}, поэтому при бюджете около ${this.formatRub(profile.budgetRub)} прямого попадания в актуальную экспозицию может не быть. Могу показать самый близкий входной формат или предложить другой сценарий под ваш запрос.`,
+          recommended_unit_ids: [],
+          lead_score: this.calculateLeadScore(profile, candidateUnits.length),
+          handoff_required: false,
+          support_ticket_required: false,
+          missing_fields: missingFields,
+          policy_flags: ["price_unverified"]
+        };
+      }
+
+      const prefix = this.isPurposeSignal(normalized)
+        ? `Понял, рассматриваете покупку ${this.describePurpose(profile.purpose)}.`
+        : this.isBudgetSignal(normalized)
+          ? "Отлично, бюджет понял."
+          : this.isRoomsSignal(normalized)
+            ? "Формат понял."
+            : "По сроку понял.";
+
+      return {
+        intent,
+        reply_text: `${prefix} ${this.buildGuidedQuestion(missingFields, activeProject)}`,
+        recommended_unit_ids: [],
+        lead_score: this.calculateLeadScore(profile, candidateUnits.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: missingFields,
+        policy_flags: []
+      };
+    }
+
+    if (normalized === "покажите минимальную цену входа и самый выгодный формат покупки" && projectEntryUnit) {
+      return {
+        intent: "unit_recommendation",
+        reply_text: `Если смотреть на самый доступный вход${activeProject ? ` в ${projectName}` : ""}, ориентир сейчас начинается примерно от ${this.formatRub(projectEntryUnit.priceRub)} за ${projectEntryUnit.areaSqm} м². Это нижняя планка проекта по текущей публичной экспозиции. Если хотите, следующим сообщением покажу ещё 1-2 близких по смыслу варианта и объясню, где есть логика доплаты.`,
+        recommended_unit_ids: [projectEntryUnit.id],
+        lead_score: Math.max(this.calculateLeadScore(profile, candidateUnits.length), 60),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: missingFields,
+        policy_flags: ["price_unverified"]
+      };
+    }
+
+    if (normalized === "подберите 3 самых подходящих варианта по моему сценарию покупки") {
+      if (candidateUnits.length > 0) {
+        return {
+          intent: "unit_recommendation",
+          reply_text: `Подобрал 2-3 самых релевантных варианта${activeProject ? ` по ${projectName}` : ""}. Ниже покажу shortlist из текущего каталога, а дальше могу сузить его до 1-2 лотов под ваш сценарий покупки.`,
+          recommended_unit_ids: candidateUnits.slice(0, 3).map((unit) => unit.id),
+          lead_score: Math.max(this.calculateLeadScore(profile, candidateUnits.length), 66),
+          handoff_required: false,
+          support_ticket_required: false,
+          missing_fields: missingFields,
+          policy_flags: []
+        };
+      }
+
+      return {
+        intent: "clarify_needs",
+        reply_text: this.buildGuidedQuestion(missingFields, activeProject),
+        recommended_unit_ids: [],
+        lead_score: this.calculateLeadScore(profile, candidateUnits.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: missingFields,
+        policy_flags: []
+      };
+    }
+
+    if (normalized === "сравните варианты и объясните разницу по выгоде, ликвидности и сценарию покупки") {
+      if (candidateUnits.length >= 2) {
+        return {
+          intent: "unit_recommendation",
+          reply_text: `Сравню варианты не в лоб по цене, а по смыслу: где сильнее входной билет, где лучше сценарий для жизни, а где понятнее логика для инвестиции. Ниже оставлю лучшие варианты из текущего каталога.`,
+          recommended_unit_ids: candidateUnits.slice(0, 3).map((unit) => unit.id),
+          lead_score: Math.max(this.calculateLeadScore(profile, candidateUnits.length), 68),
+          handoff_required: false,
+          support_ticket_required: false,
+          missing_fields: missingFields,
+          policy_flags: []
+        };
+      }
+
+      return {
+        intent: "clarify_needs",
+        reply_text: `Чтобы сравнение было полезным, сначала зафиксируем основу. ${this.buildGuidedQuestion(missingFields, activeProject)}`,
+        recommended_unit_ids: [],
+        lead_score: this.calculateLeadScore(profile, candidateUnits.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: missingFields,
+        policy_flags: []
+      };
+    }
+
+    if (normalized === "хочу скидку или актуальные специальные условия") {
+      return {
+        intent: phone ? "handoff_manager" : "sales_qualification",
+        reply_text: phone
+          ? "Понял запрос на более сильные условия. Передаю менеджеру ваш кейс, чтобы он проверил актуальные акции и что реально можно сделать по условиям."
+          : "Понял запрос на более сильные условия. Персональную скидку заранее не обещаю, но могу передать кейс менеджеру, чтобы он проверил актуальные акции и условия. Если удобно, отправьте контакт.",
+        recommended_unit_ids: [],
+        lead_score: Math.max(this.calculateLeadScore(profile, candidateUnits.length), 70),
+        handoff_required: Boolean(phone),
+        support_ticket_required: false,
+        missing_fields: phone ? [] : ["phone"],
+        policy_flags: phone ? ["discount_out_of_policy", "human_handoff_required"] : ["discount_out_of_policy"]
+      };
+    }
+
+    if (normalized === "свяжите меня с менеджером") {
+      return {
+        intent: phone ? "handoff_manager" : "clarify_needs",
+        reply_text: phone
+          ? "Отлично, передаю вас менеджеру. Он получит ваш контекст по проекту и сможет продолжить разговор предметно."
+          : "Подключу менеджера. Отправьте, пожалуйста, удобный номер телефона или контакт, и я передам запрос без потери деталей.",
+        recommended_unit_ids: [],
+        lead_score: Math.max(this.calculateLeadScore(profile, candidateUnits.length), 78),
+        handoff_required: Boolean(phone),
+        support_ticket_required: false,
+        missing_fields: phone ? [] : ["phone"],
+        policy_flags: phone ? ["human_handoff_required"] : []
+      };
+    }
+
+    return null;
+  }
+
+  private extractConversationProfile(conversationText: string, phone: string | null) {
+    const normalized = conversationText.toLowerCase();
+
+    return {
+      purpose: this.extractPurpose(normalized),
+      budgetRub: this.catalog.extractBudget(conversationText),
+      rooms: this.catalog.extractRooms(conversationText),
+      timeline: this.extractTimeline(normalized),
+      hasPhone: Boolean(phone || /контакт:\s*\+?\d|\+7\d{10}|\b8\d{10}\b/.test(normalized))
+    };
+  }
+
+  private buildMissingFields(profile: {
+    purpose: "self" | "family" | "investment" | "parents" | null;
+    budgetRub: number | null;
+    rooms: number | null;
+    timeline: "urgent" | "soon" | "later" | null;
+    hasPhone: boolean;
+  }) {
+    const missingFields: Array<"purpose" | "budget" | "rooms" | "timeline"> = [];
+
+    if (!profile.purpose) {
+      missingFields.push("purpose");
+    }
+
+    if (!profile.budgetRub) {
+      missingFields.push("budget");
+    }
+
+    if (profile.rooms === null) {
+      missingFields.push("rooms");
+    }
+
+    if (!profile.timeline) {
+      missingFields.push("timeline");
+    }
+
+    return missingFields;
+  }
+
+  private buildGuidedQuestion(
+    missingFields: string[],
+    activeProject: Project | null
+  ) {
+    const first = missingFields[0];
+    const second = missingFields[1];
+    const projectPrefix = activeProject ? `Если говорим про ${activeProject.name}, ` : "";
+
+    if (!first) {
+      return "Если хотите, уже могу перейти к shortlist и показать 2-3 релевантных варианта.";
+    }
+
+    if (first === "purpose") {
+      if (second === "budget") {
+        return `${projectPrefix}подскажите, для какого сценария покупаете и какой бюджет комфортен?`;
+      }
+
+      return `${projectPrefix}подскажите, для какого сценария покупаете: для себя, семьи, инвестиций или родителей?`;
+    }
+
+    if (first === "budget") {
+      if (second === "rooms") {
+        return `${projectPrefix}подскажите комфортный бюджет и какой формат нужен: студия, 1, 2 или 3 комнаты+?`;
+      }
+
+      if (second === "timeline") {
+        return `${projectPrefix}подскажите комфортный бюджет и в какие сроки планируете решение?`;
+      }
+
+      return `${projectPrefix}подскажите комфортный бюджет покупки.`;
+    }
+
+    if (first === "rooms") {
+      if (second === "timeline") {
+        return `${projectPrefix}сколько комнат рассматриваете и в какие сроки планируете решение: срочно, 1-3 месяца или пока присматриваетесь?`;
+      }
+
+      return `${projectPrefix}какой формат нужен: студия, 1, 2 или 3 комнаты+?`;
+    }
+
+    if (first === "timeline") {
+      return `${projectPrefix}по срокам как удобнее: срочно, 1-3 месяца или пока спокойно выбираете?`;
+    }
+
+    return `${projectPrefix}уточню ещё один важный момент, чтобы подбор был точным.`;
+  }
+
+  private calculateLeadScore(
+    profile: {
+      purpose: "self" | "family" | "investment" | "parents" | null;
+      budgetRub: number | null;
+      rooms: number | null;
+      timeline: "urgent" | "soon" | "later" | null;
+      hasPhone: boolean;
+    },
+    candidateUnitsCount: number
+  ) {
+    let score = 32;
+
+    if (profile.purpose) {
+      score += 10;
+    }
+
+    if (profile.budgetRub) {
+      score += 18;
+    }
+
+    if (profile.rooms !== null) {
+      score += 12;
+    }
+
+    if (profile.timeline) {
+      score += profile.timeline === "urgent" ? 18 : 10;
+    }
+
+    if (candidateUnitsCount > 0) {
+      score += 8;
+    }
+
+    if (profile.hasPhone) {
+      score += 12;
+    }
+
+    return Math.min(score, 95);
+  }
+
+  private extractPurpose(normalizedText: string) {
+    if (this.containsAny(normalizedText, ["инвест", "сдач", "ликвидн"])) {
+      return "investment" as const;
+    }
+
+    if (this.containsAny(normalizedText, ["семь", "ребен", "дет", "для жизни"])) {
+      return "family" as const;
+    }
+
+    if (this.containsAny(normalizedText, ["родител", "маме", "папе"])) {
+      return "parents" as const;
+    }
+
+    if (this.containsAny(normalizedText, ["для себя", "себе", "переезд", "жить"])) {
+      return "self" as const;
+    }
+
+    return null;
+  }
+
+  private extractTimeline(normalizedText: string) {
+    if (this.containsAny(normalizedText, ["срочно", "сегодня", "на этой неделе", "до месяца"])) {
+      return "urgent" as const;
+    }
+
+    if (this.containsAny(normalizedText, ["1-3 месяца", "три месяца", "в ближайшие месяцы", "скоро"])) {
+      return "soon" as const;
+    }
+
+    if (this.containsAny(normalizedText, ["присматриваюсь", "позже", "пока смотрю", "не спешу", "без спешки"])) {
+      return "later" as const;
+    }
+
+    return null;
+  }
+
+  private containsAny(normalizedText: string, tokens: string[]) {
+    return tokens.some((token) => normalizedText.includes(token));
+  }
+
+  private describePurpose(purpose: "self" | "family" | "investment" | "parents" | null) {
+    switch (purpose) {
+      case "investment":
+        return "под инвестицию";
+      case "family":
+        return "для семьи";
+      case "parents":
+        return "для родителей";
+      case "self":
+        return "для себя";
+      default:
+        return "под ваш сценарий";
+    }
+  }
+
+  private formatRub(value: number) {
+    return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
+  }
+
+  private isGreetingSignal(normalizedText: string) {
+    return [
+      "привет",
+      "здравствуйте",
+      "добрый день",
+      "добрый вечер",
+      "доброе утро",
+      "приветствую",
+      "hello",
+      "hi"
+    ].includes(normalizedText);
+  }
+
+  private isPurposeSignal(normalizedText: string) {
+    return normalizedText.startsWith("покупаю для ");
+  }
+
+  private isBudgetSignal(normalizedText: string) {
+    return normalizedText.startsWith("бюджет ");
+  }
+
+  private isRoomsSignal(normalizedText: string) {
+    return normalizedText.startsWith("нужна ") || /(^| )\d[\s-]?(к|комн|комнат)/.test(normalizedText);
+  }
+
+  private isTimelineSignal(normalizedText: string) {
+    return normalizedText.startsWith("покупка в ") || normalizedText.startsWith("нужно срочно") || normalizedText.startsWith("пока присматриваюсь");
   }
 }

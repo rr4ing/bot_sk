@@ -225,6 +225,7 @@ describe("TelegramService", () => {
     const getRelevantProject = jest.fn().mockResolvedValue(null);
     const findCandidateUnits = jest.fn().mockResolvedValue([]);
     const getRelevantDocuments = jest.fn().mockResolvedValue([]);
+    const sendMessage = jest.fn();
     const decide = jest.fn().mockResolvedValue({
       intent: "clarify_needs",
       reply_text: "Уточню еще пару деталей.",
@@ -252,7 +253,7 @@ describe("TelegramService", () => {
         getRelevantProject,
         findCandidateUnits,
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
-        extractBudget: jest.fn().mockReturnValue(null),
+        extractBudget: jest.fn().mockReturnValue(20000000),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
       {
@@ -265,7 +266,7 @@ describe("TelegramService", () => {
         enforce: jest.fn((decision) => decision)
       } as never,
       {
-        sendMessage: jest.fn()
+        sendMessage
       } as never,
       {
         syncLeadFromDecision: jest.fn().mockResolvedValue(null)
@@ -295,10 +296,10 @@ describe("TelegramService", () => {
       expect.stringContaining("Покупаю для инвестиций")
     );
     expect(getRelevantDocuments).toHaveBeenCalledWith(expect.stringContaining("Бюджет до 20 млн"));
-    expect(decide).toHaveBeenCalledWith(
-      "Бюджет до 20 млн",
+    expect(decide).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        conversationText: expect.stringContaining("Бадаевский")
+        text: expect.stringContaining("сколько комнат")
       })
     );
   });
