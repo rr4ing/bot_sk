@@ -63,6 +63,19 @@ function loadSystemPromptFromFile() {
 
 const BASE_SYSTEM_PROMPT = loadSystemPromptFromFile();
 
+const RUNTIME_SYSTEM_PROMPT = [
+  "Ты AI-консультант отдела продаж застройщика. Работаешь только на русском.",
+  "Твоя задача: понять уже полученную от клиента информацию, не задавать повторные вопросы и двигать диалог к полезному следующему шагу.",
+  "Если клиент уже сообщил цель покупки, бюджет, формат или срок, признай это и используй в ответе.",
+  "Не повторяй один и тот же вопрос повторно, если ответ уже есть в history, signals или hints.",
+  "Отвечай коротко, по делу, без канцелярита и без давления. Обычно 2-5 предложений.",
+  "Не выдумывай цены, наличие, скидки, сроки и юридические обещания. Если точность не гарантирована, говори аккуратно.",
+  "Если данных уже достаточно для shortlist или сравнения, переходи к этому, а не продолжай qualification.",
+  "Если клиент пишет коротко, интерпретируй это как продолжение текущего шага диалога, а не как новый диалог.",
+  "ЖК Бадаевский: премиальный проект Capital Group на Кутузовском проспекте, архитектура Herzog & de Meuron, первая линия Москвы-реки, акцент на статус, архитектуру, виды, редкость продукта и качество среды.",
+  "Верни только JSON по контракту AIDecision."
+].join("\n");
+
 const aiDecisionLooseSchema = aiDecisionSchema.partial().extend({
   intent: aiDecisionSchema.shape.intent,
   reply_text: aiDecisionSchema.shape.reply_text,
@@ -95,8 +108,10 @@ export class AiService {
 
     const signals = this.collectSignals(messageText, context);
     const systemPrompt = [
-      BASE_SYSTEM_PROMPT,
-      "",
+      RUNTIME_SYSTEM_PROMPT,
+      context.activeProject
+        ? `Текущий проект в фокусе: ${context.activeProject.name}. Не уводи в другой ЖК без явного запроса клиента.`
+        : "Если клиент явно говорит о конкретном ЖК, держись его и не уводи разговор в другой проект.",
       "Дополнительные runtime-правила:",
       "- Если клиент уже дал цель покупки, не спрашивай ее повторно.",
       "- Если клиент уже дал бюджет, не спрашивай его повторно.",
@@ -108,39 +123,45 @@ export class AiService {
       "- Если клиент поздоровался, обязательно поздоровайся в ответ."
     ].join("\n");
 
+    const compactHistory = context.history.slice(-6).map((entry) => ({
+      role: entry.role,
+      content: this.truncate(entry.content, 220)
+    }));
+
+    const compactUnits = context.candidateUnits.slice(0, 3).map((unit) => ({
+      id: unit.id,
+      code: unit.code,
+      rooms: unit.rooms,
+      floor: unit.floor,
+      areaSqm: unit.areaSqm,
+      priceRub: unit.priceRub,
+      status: unit.status,
+      finishing: unit.finishing
+    }));
+
+    const compactKnowledge = context.knowledgeDocuments.slice(0, 2).map((doc) => ({
+      title: doc.title,
+      kind: doc.kind,
+      excerpt: this.truncate(doc.excerpt, 180),
+      body_preview: this.truncate(doc.body, 320),
+      tags: doc.tags.slice(0, 5)
+    }));
+
     const input = {
       messageText,
-      history: context.history,
+      history: compactHistory,
       signals,
       project: context.activeProject
         ? {
             name: context.activeProject.name,
             city: context.activeProject.city,
             district: context.activeProject.district,
-            description: context.activeProject.description,
+            description: this.truncate(context.activeProject.description, 220),
             salesHeadline: context.activeProject.salesHeadline
           }
         : null,
-      units: context.candidateUnits.map((unit) => ({
-        id: unit.id,
-        projectName: context.activeProject?.name ?? null,
-        code: unit.code,
-        rooms: unit.rooms,
-        floor: unit.floor,
-        areaSqm: unit.areaSqm,
-        priceRub: unit.priceRub,
-        finishing: unit.finishing,
-        status: unit.status,
-        perks: unit.perks,
-        notes: unit.notes
-      })),
-      knowledge: context.knowledgeDocuments.map((doc) => ({
-        title: doc.title,
-        kind: doc.kind,
-        excerpt: doc.excerpt,
-        body_preview: this.truncate(doc.body, 1400),
-        tags: doc.tags
-      })),
+      units: compactUnits,
+      knowledge: compactKnowledge,
       hints: {
         detectedBudgetRub: signals.budgetRub,
         detectedRooms: signals.rooms,
