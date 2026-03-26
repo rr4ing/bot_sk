@@ -28,6 +28,7 @@ export interface TelegramUpdate {
 export interface DecisionContext {
   activeProject: Project | null;
   candidateUnits: Unit[];
+  projectEntryUnit?: Unit | null;
   knowledgeDocuments: KnowledgeDocument[];
   history: Array<{ role: "user" | "assistant"; content: string }>;
   conversationText?: string;

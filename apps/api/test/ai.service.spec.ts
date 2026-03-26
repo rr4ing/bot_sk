@@ -141,4 +141,44 @@ describe("AiService fallback sales flow", () => {
     expect(decision.reply_text).toContain("бюджет");
     expect(decision.reply_text).toContain("какой формат");
   });
+
+  it("answers the best entry action with a concrete premium entry anchor", async () => {
+    const service = new AiService(env as never, catalog as never);
+
+    const decision = await service.decide("Покажите минимальную цену входа и самый выгодный формат покупки", {
+      activeProject: project,
+      candidateUnits: [unit],
+      projectEntryUnit: unit,
+      knowledgeDocuments: [knowledgeDocument],
+      history: [{ role: "user", content: "Самый выгодный вход" }],
+      conversationText: "Самый выгодный вход"
+    });
+
+    expect(decision.intent).toBe("unit_recommendation");
+    expect(decision.recommended_unit_ids).toEqual(["unit-1"]);
+    expect(decision.reply_text).toContain("107");
+    expect(decision.policy_flags).toContain("price_unverified");
+  });
+
+  it("handles timeline-only quick replies by asking the next missing qualification step", async () => {
+    const service = new AiService(env as never, catalog as never);
+
+    const decision = await service.decide("Пока присматриваюсь, без спешки", {
+      activeProject: project,
+      candidateUnits: [unit],
+      projectEntryUnit: unit,
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Бадаевский" },
+        { role: "assistant", content: "Подскажите бюджет и формат." }
+      ],
+      conversationText: "Бадаевский\nПока присматриваюсь, без спешки"
+    });
+
+    expect(decision.intent).toBe("clarify_needs");
+    expect(decision.reply_text).toContain("бюджет");
+    expect(decision.reply_text).toContain("сценария");
+    expect(decision.missing_fields).toContain("budget");
+    expect(decision.missing_fields).toContain("purpose");
+  });
 });

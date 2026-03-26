@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { LEAD_HOT_THRESHOLD } from "@builderbot/config";
+import { Unit } from "@prisma/client";
 import { TelegramUpdate } from "./types";
 import { ConversationService } from "./conversation.service";
 import { CatalogService } from "./catalog.service";
@@ -36,6 +37,7 @@ export class TelegramService {
     const messageText =
       update.message?.text ??
       `Контакт: ${update.message?.contact?.phone_number ?? "не указан"}`;
+    const normalizedMessageText = this.normalizeInboundText(messageText);
     const customerName = [
       update.message?.from?.first_name ?? update.message?.contact?.first_name,
       update.message?.from?.last_name ?? update.message?.contact?.last_name
@@ -49,21 +51,23 @@ export class TelegramService {
 
     const history = await this.conversations.getHistory(conversation.id);
     const conversationText = this.buildDecisionText(history);
-
-    const [activeProject, candidateUnits, knowledgeDocuments] = await Promise.all([
-      this.catalog.getRelevantProject(conversationText),
+    const activeProject = await this.catalog.getRelevantProject(conversationText);
+    const [candidateUnits, projectEntryUnit, knowledgeDocuments] = await Promise.all([
       this.catalog.findCandidateUnits(conversationText),
+      this.catalog.findProjectEntryUnit(activeProject?.id),
       this.knowledge.getRelevantDocuments(conversationText)
     ]);
+    const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit);
 
-    const decision = await this.ai.decide(messageText, {
+    const decision = await this.ai.decide(normalizedMessageText, {
       activeProject,
-      candidateUnits,
+      candidateUnits: decisionUnits,
+      projectEntryUnit,
       knowledgeDocuments,
       history,
       conversationText
     });
-    const safeDecision = this.policy.enforce(decision, candidateUnits);
+    const safeDecision = this.policy.enforce(decision, decisionUnits);
 
     await this.conversations.appendMessage(
       conversation.id,
@@ -129,7 +133,7 @@ export class TelegramService {
     await this.telegramClient.sendMessage({
       chatId: String(update.message?.chat.id),
       text: safeDecision.reply_text,
-      replyMarkup: this.buildReplyKeyboard(safeDecision.missing_fields)
+      replyMarkup: this.buildReplyKeyboard(safeDecision.missing_fields, safeDecision.intent)
     });
 
     return {
@@ -138,7 +142,7 @@ export class TelegramService {
     };
   }
 
-  private buildReplyKeyboard(missingFields: string[]) {
+  private buildReplyKeyboard(missingFields: string[], intent: string) {
     const orderedFields = ["phone", "purpose", "budget", "rooms", "timeline"] as const;
     const nextField = orderedFields.find((field) => missingFields.includes(field));
 
@@ -197,6 +201,21 @@ export class TelegramService {
       };
     }
 
+    if (
+      !nextField &&
+      ["sales_qualification", "clarify_needs", "unit_recommendation"].includes(intent)
+    ) {
+      return {
+        keyboard: [
+          [{ text: "Подобрать 3 варианта" }, { text: "Сравнить варианты" }],
+          [{ text: "Самый выгодный вход" }, { text: "Хочу скидку" }],
+          [{ text: "Связаться с менеджером" }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: false
+      };
+    }
+
     return {
       remove_keyboard: false
     };
@@ -206,7 +225,48 @@ export class TelegramService {
     return history
       .filter((entry) => entry.role === "user")
       .slice(-8)
-      .map((entry) => entry.content)
+      .map((entry) => this.normalizeInboundText(entry.content))
       .join("\n");
+  }
+
+  private mergeUnits(candidateUnits: Unit[], projectEntryUnit?: Unit | null) {
+    if (!projectEntryUnit) {
+      return candidateUnits;
+    }
+
+    return Array.from(
+      new Map([...candidateUnits, projectEntryUnit].map((unit) => [unit.id, unit])).values()
+    );
+  }
+
+  private normalizeInboundText(messageText: string) {
+    const compact = messageText.trim();
+    const normalized = compact.toLowerCase();
+
+    const exactMatches: Record<string, string> = {
+      "для себя": "Покупаю для себя",
+      "для семьи": "Покупаю для семьи",
+      "для инвестиций": "Покупаю для инвестиций",
+      "для родителей": "Покупаю для родителей",
+      "до 20 млн": "Бюджет до 20 млн",
+      "20-40 млн": "Бюджет 20-40 млн",
+      "40-80 млн": "Бюджет 40-80 млн",
+      "80+ млн": "Бюджет 80+ млн",
+      "студия": "Нужна студия",
+      "1-комнатная": "Нужна 1-комнатная квартира",
+      "2-комнатная": "Нужна 2-комнатная квартира",
+      "3-комнатная+": "Нужна 3-комнатная квартира или больше",
+      "срочно, до месяца": "Нужно срочно, до месяца",
+      "1-3 месяца": "Покупка в ближайшие 1-3 месяца",
+      "3-6 месяцев": "Покупка в горизонте 3-6 месяцев",
+      "пока присматриваюсь": "Пока присматриваюсь, без спешки",
+      "подобрать 3 варианта": "Подберите 3 самых подходящих варианта по моему сценарию покупки",
+      "сравнить варианты": "Сравните варианты и объясните разницу по выгоде, ликвидности и сценарию покупки",
+      "самый выгодный вход": "Покажите минимальную цену входа и самый выгодный формат покупки",
+      "хочу скидку": "Хочу скидку или актуальные специальные условия",
+      "связаться с менеджером": "Свяжите меня с менеджером"
+    };
+
+    return exactMatches[normalized] ?? compact;
   }
 }

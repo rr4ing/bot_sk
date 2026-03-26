@@ -18,11 +18,14 @@ interface SalesSignals {
   isPurposeOnly: boolean;
   isBudgetOnly: boolean;
   isRoomsOnly: boolean;
+  isTimelineOnly: boolean;
   isShortReply: boolean;
   wantsManager: boolean;
   wantsProjectOverview: boolean;
   wantsPriceAnswer: boolean;
   wantsSelection: boolean;
+  wantsComparison: boolean;
+  wantsBestEntry: boolean;
   wantsCallback: boolean;
   hasPhone: boolean;
   hasNegative: boolean;
@@ -225,6 +228,57 @@ export class AiService {
       };
     }
 
+    if (signals.wantsComparison && recommended.length >= 2) {
+      return {
+        intent: "unit_recommendation",
+        reply_text:
+          "Сравню не в лоб по цифрам, а по смыслу покупки: покажу, где сильнее входной билет, где лучше ликвидность, а где выше ценность для жизни. Ниже оставлю 2-3 варианта, от которых уже есть смысл отталкиваться.",
+        recommended_unit_ids: recommended.map((unit) => unit.id).slice(0, 3),
+        lead_score: Math.max(this.calculateLeadScore(signals, recommended.length), 68),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: this.buildMissingFields(signals),
+        policy_flags: []
+      };
+    }
+
+    if (signals.wantsBestEntry && context.projectEntryUnit) {
+      const entryUnit = context.projectEntryUnit;
+
+      return {
+        intent: "unit_recommendation",
+        reply_text: `Если смотреть на самый доступный вход${context.activeProject ? ` в ${projectName}` : ""}, то сейчас ориентир начинается примерно от ${this.formatRub(entryUnit.priceRub)} за ${entryUnit.areaSqm} м². Это хороший способ быстро понять нижнюю планку проекта. Если хотите, следующим сообщением покажу, стоит ли брать именно входной лот или лучше доплатить за более сильный формат.`,
+        recommended_unit_ids: [entryUnit.id],
+        lead_score: Math.max(this.calculateLeadScore(signals, 1), 60),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: this.buildMissingFields(signals),
+        policy_flags: ["price_unverified"]
+      };
+    }
+
+    if (
+      context.activeProject &&
+      context.projectEntryUnit &&
+      signals.budgetRub &&
+      signals.budgetRub < context.projectEntryUnit.priceRub
+    ) {
+      return {
+        intent: "clarify_needs",
+        reply_text: `Скажу честно: в ${projectName} текущий публичный вход сейчас начинается примерно от ${this.formatRub(
+          context.projectEntryUnit.priceRub
+        )}, поэтому при бюджете до ${this.formatRub(
+          signals.budgetRub
+        )} прямого попадания в текущую экспозицию не вижу. Могу сделать два полезных шага: показать самый близкий по входу формат или предложить альтернативный сценарий покупки без потери логики сделки.`,
+        recommended_unit_ids: [],
+        lead_score: Math.max(this.calculateLeadScore(signals, 0), 58),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: this.buildMissingFields(signals),
+        policy_flags: ["price_unverified"]
+      };
+    }
+
     if (signals.hasPriceObjection || signals.hasHesitation) {
       return {
         intent: "sales_qualification",
@@ -359,6 +413,11 @@ export class AiService {
       isPurposeOnly,
       isBudgetOnly,
       isRoomsOnly,
+      isTimelineOnly:
+        this.extractTimeline(currentNormalized) !== null &&
+        this.catalog.extractBudget(currentNormalized) === null &&
+        this.catalog.extractRooms(currentNormalized) === null &&
+        this.extractPurpose(currentNormalized) === null,
       isShortReply,
       wantsManager: this.containsAny(normalized, [
         "менеджер",
@@ -388,10 +447,23 @@ export class AiService {
       wantsSelection: this.containsAny(normalized, [
         "подбери",
         "подберите",
+        "подобрать",
         "подборка",
         "варианты",
         "покажи варианты",
         "shortlist"
+      ]),
+      wantsComparison: this.containsAny(normalized, [
+        "сравни",
+        "сравнить",
+        "сравнение"
+      ]),
+      wantsBestEntry: this.containsAny(normalized, [
+        "выгодный вход",
+        "минимальную цену входа",
+        "самый выгодный вход",
+        "входной билет",
+        "минимальный вход"
       ]),
       wantsCallback: this.containsAny(normalized, [
         "перезвон",
@@ -447,6 +519,13 @@ export class AiService {
   ): AIDecision {
     const signals = this.collectSignals(messageText, context);
     const canRecommendUnits = this.canRecommendUnits(signals);
+    const missingFields = this.dedupeMissingFields(
+      decision.missing_fields.length > 0 ? decision.missing_fields : this.buildMissingFields(signals)
+    );
+    const guidedQuestion = this.buildGuidedQuestion(missingFields, context);
+    const lastAssistantMessage = context.history
+      .filter((entry) => entry.role === "assistant")
+      .at(-1)?.content;
 
     if (signals.isGreeting && !signals.wantsProjectOverview) {
       return aiDecisionSchema.parse({
@@ -467,12 +546,12 @@ export class AiService {
         intent: "sales_qualification",
         reply_text: `Понял, рассматриваете покупку ${this.describePurposeForReply(
           signals.purpose
-        )}. Тогда следующий шаг такой: подскажите комфортный бюджет и какой формат хотите смотреть — 1, 2 или 3 комнаты+?`,
+        )}. ${guidedQuestion}`,
         recommended_unit_ids: [],
         lead_score: Math.max(decision.lead_score, 42),
         handoff_required: false,
         support_ticket_required: false,
-        missing_fields: this.dedupeMissingFields(["budget", "rooms", "timeline"]),
+        missing_fields: missingFields,
         policy_flags: []
       });
     }
@@ -480,13 +559,12 @@ export class AiService {
     if (signals.isBudgetOnly) {
       return aiDecisionSchema.parse({
         intent: "clarify_needs",
-        reply_text:
-          "Отлично, бюджет понял. Теперь быстро сузим подбор: сколько комнат рассматриваете и покупка нужна в ближайшее время или можно спокойно выбирать?",
+        reply_text: `Отлично, бюджет понял. ${guidedQuestion}`,
         recommended_unit_ids: [],
         lead_score: Math.max(decision.lead_score, 46),
         handoff_required: false,
         support_ticket_required: false,
-        missing_fields: this.dedupeMissingFields(["rooms", "timeline", "purpose"]),
+        missing_fields: missingFields,
         policy_flags: []
       });
     }
@@ -494,13 +572,25 @@ export class AiService {
     if (signals.isRoomsOnly) {
       return aiDecisionSchema.parse({
         intent: "clarify_needs",
-        reply_text:
-          "Формат понял. Чтобы не стрелять мимо, подскажите ещё ориентир по бюджету и это покупка для жизни, семьи или инвестиции?",
+        reply_text: `Формат понял. ${guidedQuestion}`,
         recommended_unit_ids: [],
         lead_score: Math.max(decision.lead_score, 46),
         handoff_required: false,
         support_ticket_required: false,
-        missing_fields: this.dedupeMissingFields(["budget", "purpose", "timeline"]),
+        missing_fields: missingFields,
+        policy_flags: []
+      });
+    }
+
+    if (signals.isTimelineOnly) {
+      return aiDecisionSchema.parse({
+        intent: "clarify_needs",
+        reply_text: `По сроку понял. ${guidedQuestion}`,
+        recommended_unit_ids: [],
+        lead_score: Math.max(decision.lead_score, 46),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: missingFields,
         policy_flags: []
       });
     }
@@ -516,14 +606,24 @@ export class AiService {
       return aiDecisionSchema.parse({
         ...decision,
         intent: "sales_qualification",
-        reply_text:
-          "Чтобы показать действительно подходящие варианты, сначала уточню пару опорных вещей: для чего покупаете, какой бюджет комфортен и сколько комнат рассматриваете?",
+        reply_text: guidedQuestion,
         recommended_unit_ids: [],
-        missing_fields: this.dedupeMissingFields(
-          decision.missing_fields.length > 0
-            ? decision.missing_fields
-            : ["purpose", "budget", "rooms", "timeline"]
-        )
+        missing_fields: missingFields
+      });
+    }
+
+    if (
+      lastAssistantMessage &&
+      this.normalizeForComparison(lastAssistantMessage) ===
+        this.normalizeForComparison(decision.reply_text) &&
+      missingFields.length > 0
+    ) {
+      return aiDecisionSchema.parse({
+        ...decision,
+        intent: "clarify_needs",
+        reply_text: guidedQuestion,
+        recommended_unit_ids: canRecommendUnits ? decision.recommended_unit_ids : [],
+        missing_fields: missingFields
       });
     }
 
@@ -706,10 +806,71 @@ export class AiService {
 
   private canRecommendUnits(signals: SalesSignals) {
     const hasCoreIntent = Boolean(signals.purpose || signals.timeline);
-    const hasSelectionIntent = signals.wantsSelection || signals.wantsPriceAnswer;
+    const hasSelectionIntent =
+      signals.wantsSelection ||
+      signals.wantsPriceAnswer ||
+      signals.wantsComparison ||
+      signals.wantsBestEntry;
     const hasCatalogFit = signals.budgetRub !== null || signals.rooms !== null;
 
     return hasSelectionIntent || (hasCatalogFit && hasCoreIntent);
+  }
+
+  private buildGuidedQuestion(
+    missingFields: AIDecision["missing_fields"],
+    context: DecisionContext
+  ) {
+    const first = missingFields[0];
+    const second = missingFields[1];
+    const projectPrefix = context.activeProject
+      ? `Если говорим про ${context.activeProject.name}, `
+      : "";
+
+    if (!first) {
+      return "Если хотите, сразу покажу shortlist или сравню 2-3 самых сильных варианта.";
+    }
+
+    if (first === "purpose") {
+      if (second === "budget") {
+        return `${projectPrefix}подскажите, для какого сценария покупаете и какой бюджет комфортен?`;
+      }
+
+      return `${projectPrefix}подскажите, для какого сценария покупаете: для себя, семьи, инвестиций или родителей?`;
+    }
+
+    if (first === "budget") {
+      if (second === "rooms") {
+        return `${projectPrefix}подскажите комфортный бюджет и какой формат нужен: студия, 1, 2 или 3 комнаты+?`;
+      }
+
+      if (second === "timeline") {
+        return `${projectPrefix}подскажите комфортный бюджет и как быстро хотите выйти на сделку?`;
+      }
+
+      return `${projectPrefix}подскажите комфортный бюджет покупки.`;
+    }
+
+    if (first === "rooms") {
+      if (second === "timeline") {
+        return `${projectPrefix}сколько комнат рассматриваете и в какие сроки планируете решение: срочно, 1-3 месяца или пока присматриваетесь?`;
+      }
+
+      if (second === "purpose") {
+        return `${projectPrefix}сколько комнат рассматриваете и покупка для жизни, семьи или инвестиций?`;
+      }
+
+      return `${projectPrefix}какой формат рассматриваете: студия, 1, 2 или 3 комнаты+?`;
+    }
+
+    if (first === "timeline") {
+      return `${projectPrefix}по срокам как удобнее: срочно, в ближайшие 1-3 месяца или пока спокойно выбираете?`;
+    }
+
+    if (first === "phone") {
+      return "Если удобно, отправьте контакт, и я передам менеджеру уже собранный контекст без потери деталей.";
+    }
+
+    return `${projectPrefix}уточню ещё один момент, чтобы подбор был предметным, а не общим.`;
   }
 
   private describePurposeForReply(purpose: PurchasePurpose) {
@@ -734,5 +895,9 @@ export class AiService {
   private shortenReply(reply: string) {
     const paragraphs = reply.split("\n\n").filter(Boolean);
     return paragraphs.slice(0, 2).join("\n\n");
+  }
+
+  private normalizeForComparison(value: string) {
+    return value.toLowerCase().replace(/\s+/g, " ").trim();
   }
 }

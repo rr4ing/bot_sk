@@ -13,6 +13,9 @@ export class ResponsePolicyService {
     const policyFlags = new Set(decision.policy_flags);
     let replyText = decision.reply_text.trim();
     let handoffRequired = decision.handoff_required;
+    const allowCatalogPreview =
+      decision.intent === "unit_recommendation" ||
+      (decision.intent === "handoff_manager" && decision.handoff_required);
 
     if (decision.recommended_unit_ids.length !== filteredUnits.length) {
       policyFlags.add("availability_unverified");
@@ -30,6 +33,16 @@ export class ResponsePolicyService {
       policyFlags.add("availability_unverified");
       replyText =
         "Чтобы подобрать точные варианты, уточню пару деталей и при необходимости подключу менеджера для актуального наличия и цены.";
+    }
+
+    if (!allowCatalogPreview && filteredUnits.length > 0) {
+      return aiDecisionSchema.parse({
+        ...decision,
+        reply_text: replyText,
+        recommended_unit_ids: [],
+        handoff_required: handoffRequired,
+        policy_flags: Array.from(policyFlags)
+      });
     }
 
     if (filteredUnits.length > 0) {

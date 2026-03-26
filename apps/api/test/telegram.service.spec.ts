@@ -20,6 +20,7 @@ describe("TelegramService", () => {
       {
         getRelevantProject: jest.fn().mockResolvedValue(null),
         findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -87,6 +88,7 @@ describe("TelegramService", () => {
       {
         getRelevantProject: jest.fn().mockResolvedValue(null),
         findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -146,6 +148,79 @@ describe("TelegramService", () => {
     );
   });
 
+  it("shows action buttons after qualification when core data is already collected", async () => {
+    const sendMessage = jest.fn();
+    const service = new TelegramService(
+      {
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-4" }),
+        appendMessage: jest.fn(),
+        getHistory: jest.fn().mockResolvedValue([{ role: "user", content: "Хочу подбор" }]),
+        updateConversationSummary: jest.fn()
+      } as never,
+      {
+        getRelevantProject: jest.fn().mockResolvedValue(null),
+        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        extractBudget: jest.fn().mockReturnValue(20000000),
+        extractRooms: jest.fn().mockReturnValue(2)
+      } as never,
+      {
+        getRelevantDocuments: jest.fn().mockResolvedValue([])
+      } as never,
+      {
+        decide: jest.fn().mockResolvedValue({
+          intent: "unit_recommendation",
+          reply_text: "Подобрал варианты.",
+          recommended_unit_ids: [],
+          lead_score: 65,
+          handoff_required: false,
+          support_ticket_required: false,
+          missing_fields: [],
+          policy_flags: []
+        })
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    await service.handleIncomingUpdate({
+      update_id: 4,
+      message: {
+        message_id: 4,
+        date: Date.now(),
+        text: "Покажи варианты",
+        chat: { id: 40, type: "private" },
+        from: { id: 50, is_bot: false, first_name: "Лев" }
+      }
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyMarkup: expect.objectContaining({
+          keyboard: [
+            [{ text: "Подобрать 3 варианта" }, { text: "Сравнить варианты" }],
+            [{ text: "Самый выгодный вход" }, { text: "Хочу скидку" }],
+            [{ text: "Связаться с менеджером" }]
+          ]
+        })
+      })
+    );
+  });
+
   it("builds catalog context from conversation history, not just the latest quick reply", async () => {
     const getRelevantProject = jest.fn().mockResolvedValue(null);
     const findCandidateUnits = jest.fn().mockResolvedValue([]);
@@ -176,6 +251,7 @@ describe("TelegramService", () => {
       {
         getRelevantProject,
         findCandidateUnits,
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -215,12 +291,85 @@ describe("TelegramService", () => {
     });
 
     expect(getRelevantProject).toHaveBeenCalledWith(expect.stringContaining("Бадаевский"));
-    expect(findCandidateUnits).toHaveBeenCalledWith(expect.stringContaining("Для инвестиций"));
-    expect(getRelevantDocuments).toHaveBeenCalledWith(expect.stringContaining("До 20 млн"));
+    expect(findCandidateUnits).toHaveBeenCalledWith(
+      expect.stringContaining("Покупаю для инвестиций")
+    );
+    expect(getRelevantDocuments).toHaveBeenCalledWith(expect.stringContaining("Бюджет до 20 млн"));
     expect(decide).toHaveBeenCalledWith(
-      "До 20 млн",
+      "Бюджет до 20 млн",
       expect.objectContaining({
         conversationText: expect.stringContaining("Бадаевский")
+      })
+    );
+  });
+
+  it("normalizes action button text before sending it into the AI layer", async () => {
+    const decide = jest.fn().mockResolvedValue({
+      intent: "clarify_needs",
+      reply_text: "Покажу лучший вход.",
+      recommended_unit_ids: [],
+      lead_score: 55,
+      handoff_required: false,
+      support_ticket_required: false,
+      missing_fields: ["purpose", "budget"],
+      policy_flags: []
+    });
+
+    const service = new TelegramService(
+      {
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-5" }),
+        appendMessage: jest.fn(),
+        getHistory: jest
+          .fn()
+          .mockResolvedValue([{ role: "user", content: "Самый выгодный вход" }]),
+        updateConversationSummary: jest.fn()
+      } as never,
+      {
+        getRelevantProject: jest.fn().mockResolvedValue(null),
+        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        extractBudget: jest.fn().mockReturnValue(null),
+        extractRooms: jest.fn().mockReturnValue(null)
+      } as never,
+      {
+        getRelevantDocuments: jest.fn().mockResolvedValue([])
+      } as never,
+      {
+        decide
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage: jest.fn()
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    await service.handleIncomingUpdate({
+      update_id: 5,
+      message: {
+        message_id: 5,
+        date: Date.now(),
+        text: "Самый выгодный вход",
+        chat: { id: 50, type: "private" },
+        from: { id: 60, is_bot: false, first_name: "Мира" }
+      }
+    });
+
+    expect(decide).toHaveBeenCalledWith(
+      expect.stringContaining("минимальную цену входа"),
+      expect.objectContaining({
+        conversationText: expect.stringContaining("минимальную цену входа")
       })
     );
   });

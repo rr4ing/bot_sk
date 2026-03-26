@@ -129,8 +129,44 @@ export class CatalogService {
     return units;
   }
 
+  async findProjectEntryUnit(projectId?: string | null) {
+    if (!projectId) {
+      return null;
+    }
+
+    return this.prisma.unit.findFirst({
+      where: {
+        projectId,
+        status: "available",
+        priceRub: {
+          gt: 0
+        }
+      },
+      include: { project: true },
+      orderBy: [{ priceRub: "asc" }, { areaSqm: "asc" }]
+    });
+  }
+
   extractBudget(messageText: string) {
     const normalized = messageText.toLowerCase().replace(/\s/g, "");
+    const rangeMatch = normalized.match(/(\d+(?:[.,]\d+)?)[-–](\d+(?:[.,]\d+)?)млн/);
+
+    if (rangeMatch) {
+      return Math.round(Number(rangeMatch[2].replace(",", ".")) * 1_000_000);
+    }
+
+    const upToMatch = normalized.match(/до(\d+(?:[.,]\d+)?)млн/);
+
+    if (upToMatch) {
+      return Math.round(Number(upToMatch[1].replace(",", ".")) * 1_000_000);
+    }
+
+    const plusMatch = normalized.match(/(\d+(?:[.,]\d+)?)\+млн/);
+
+    if (plusMatch) {
+      return 1_000_000_000;
+    }
+
     const matchMillion = normalized.match(/(\d+(?:[.,]\d+)?)млн/);
 
     if (matchMillion) {

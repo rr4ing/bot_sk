@@ -34,4 +34,35 @@ describe("ResponsePolicyService", () => {
     expect(result.handoff_required).toBe(true);
     expect(result.policy_flags).toContain("availability_unverified");
   });
+
+  it("does not append catalog previews during qualification replies", () => {
+    const result = service.enforce(
+      {
+        intent: "sales_qualification",
+        reply_text: "Сначала уточню сценарий покупки.",
+        recommended_unit_ids: ["unit-1"],
+        lead_score: 52,
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: ["purpose", "timeline"],
+        policy_flags: []
+      },
+      [
+        {
+          id: "unit-1",
+          code: "BAD-1-473-13",
+          rooms: 1,
+          floor: 13,
+          areaSqm: 47.3,
+          priceRub: 75080952,
+          finishing: "без отделки",
+          perks: [],
+          status: "available"
+        }
+      ] as never
+    );
+
+    expect(result.recommended_unit_ids).toEqual([]);
+    expect(result.reply_text).toBe("Сначала уточню сценарий покупки.");
+  });
 });
