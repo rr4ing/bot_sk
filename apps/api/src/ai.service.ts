@@ -1,5 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import OpenAI from "openai";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { AIDecision } from "@builderbot/domain";
 import { aiDecisionSchema } from "@builderbot/domain";
 import { EnvService } from "./env";
@@ -36,6 +38,31 @@ interface SalesSignals {
   hasHesitation: boolean;
 }
 
+const PROMPT_FILE_PATH = resolve(
+  process.cwd(),
+  "docs/badaevsky-sales-system-prompt.md"
+);
+
+function loadSystemPromptFromFile() {
+  try {
+    const raw = readFileSync(PROMPT_FILE_PATH, "utf8");
+    const promptBlock = raw.match(/```md\s*([\s\S]*?)```/);
+
+    return promptBlock?.[1]?.trim() || raw;
+  } catch {
+    return [
+      "Ты сильный AI-консультант отдела продаж и поддержки застройщика.",
+      "Работай только на русском языке и отвечай спокойно, уверенно, по-человечески, без давления и без канцелярита.",
+      "Сначала отвечай по сути запроса, потом мягко квалифицируй клиента. Не задавай больше двух вопросов в одном сообщении.",
+      "Не выдумывай цены, наличие, сроки, юридические гарантии, акции и ипотечные условия вне контекста.",
+      "Если проект премиальный, продавай ценность через локацию, архитектуру, виды, приватность, редкость продукта и качество среды.",
+      "Верни только JSON по контракту AIDecision."
+    ].join("\n");
+  }
+}
+
+const BASE_SYSTEM_PROMPT = loadSystemPromptFromFile();
+
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
@@ -56,24 +83,27 @@ export class AiService {
   }
 
   async decide(messageText: string, context: DecisionContext): Promise<AIDecision> {
+    if (this.shouldUseFastPath(messageText, context)) {
+      return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
+    }
+
     if (!this.client) {
       return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
     }
 
     const signals = this.collectSignals(messageText, context);
     const systemPrompt = [
-      "Ты сильный AI-консультант отдела продаж и поддержки застройщика.",
-      "Работай только на русском языке и отвечай спокойно, уверенно, по-человечески, без давления и без канцелярита.",
-      "Твоя задача: понять сценарий клиента, перевести характеристики в выгоды, снизить тревогу и довести разговор до понятного следующего шага.",
-      "Сначала отвечай по сути запроса, потом мягко квалифицируй клиента. Не задавай больше двух вопросов в одном сообщении.",
-      "Если проект премиальный, продавай ценность через локацию, архитектуру, виды, приватность, редкость продукта и качество среды, но без пафоса и без обещаний доходности.",
-      "Если клиент говорит, что дорого, не спорь: признай ощущение, предложи сравнение, shortlist или альтернативный сценарий внутри бюджета.",
-      "Если клиент просит скидку, не обещай ее, а предлагай проверить актуальные условия у менеджера.",
-      "Если есть релевантные квартиры в каталоге, рекомендуй максимум 3 и опирайся только на них.",
-      "Не выдумывай цены, наличие, сроки, юридические гарантии, акции и ипотечные условия вне контекста.",
-      "Если точная цена или наличие не подтверждены, говори об ориентире и предлагай проверку менеджером.",
-      "Если не хватает данных, выбирай intent=sales_qualification или clarify_needs и собирай недостающие поля.",
-      "Верни только JSON по контракту AIDecision."
+      BASE_SYSTEM_PROMPT,
+      "",
+      "Дополнительные runtime-правила:",
+      "- Если клиент уже дал цель покупки, не спрашивай ее повторно.",
+      "- Если клиент уже дал бюджет, не спрашивай его повторно.",
+      "- Если клиент уже дал формат квартиры, не спрашивай его повторно.",
+      "- Если клиент нажал кнопку или ответил коротко, продолжай текущий шаг диалога, а не начинай разговор заново.",
+      "- Если в текущем проекте есть входной лот и клиент спросил про лучший вход, объясни нижнюю планку проекта.",
+      "- Если бюджет клиента ниже входного билета проекта, скажи об этом честно и предложи два полезных сценария следующего шага.",
+      "- Если уже понятны ключевые данные и клиент просит сравнение или подбор, переходи к конкретике без лишних повторов.",
+      "- Если клиент поздоровался, обязательно поздоровайся в ответ."
     ].join("\n");
 
     const input = {
@@ -519,8 +549,9 @@ export class AiService {
   ): AIDecision {
     const signals = this.collectSignals(messageText, context);
     const canRecommendUnits = this.canRecommendUnits(signals);
-    const missingFields = this.dedupeMissingFields(
-      decision.missing_fields.length > 0 ? decision.missing_fields : this.buildMissingFields(signals)
+    const missingFields = this.reconcileMissingFields(
+      decision.missing_fields,
+      signals
     );
     const guidedQuestion = this.buildGuidedQuestion(missingFields, context);
     const lastAssistantMessage = context.history
@@ -531,7 +562,7 @@ export class AiService {
       return aiDecisionSchema.parse({
         intent: "sales_qualification",
         reply_text:
-          "Помогу подобрать квартиру и не буду грузить лишним. Для начала подскажите, для чего покупаете: для себя, семьи или инвестиций?",
+          "Здравствуйте! Помогу подобрать квартиру и коротко сориентировать по Бадаевскому. Для начала подскажите, для чего покупаете: для себя, семьи или инвестиций?",
         recommended_unit_ids: [],
         lead_score: 28,
         handoff_required: false,
@@ -582,7 +613,7 @@ export class AiService {
       });
     }
 
-    if (signals.isTimelineOnly) {
+    if (signals.isTimelineOnly && !signals.wantsCallback && !signals.wantsManager) {
       return aiDecisionSchema.parse({
         intent: "clarify_needs",
         reply_text: `По сроку понял. ${guidedQuestion}`,
@@ -814,6 +845,47 @@ export class AiService {
     const hasCatalogFit = signals.budgetRub !== null || signals.rooms !== null;
 
     return hasSelectionIntent || (hasCatalogFit && hasCoreIntent);
+  }
+
+  private shouldUseFastPath(messageText: string, context: DecisionContext) {
+    const signals = this.collectSignals(messageText, context);
+
+    return Boolean(
+      signals.isGreeting ||
+        signals.isPurposeOnly ||
+        signals.isBudgetOnly ||
+        signals.isRoomsOnly ||
+        signals.isTimelineOnly ||
+        signals.wantsManager ||
+        signals.wantsCallback ||
+        signals.wantsBestEntry ||
+        signals.wantsComparison ||
+        signals.hasNegative ||
+        signals.hasSupportIntent ||
+        signals.hasMortgageIntent ||
+        signals.hasPriceObjection ||
+        signals.hasDiscountObjection ||
+        signals.hasHesitation ||
+        (signals.wantsSelection && (signals.budgetRub !== null || signals.rooms !== null || signals.purpose))
+    );
+  }
+
+  private reconcileMissingFields(
+    decisionMissingFields: AIDecision["missing_fields"],
+    signals: SalesSignals
+  ) {
+    const preservedModelFields = decisionMissingFields.filter(
+      (field) => field === "location" || field === "name"
+    );
+    const computedFields = this.buildMissingFields(signals);
+    const phoneField =
+      decisionMissingFields.includes("phone") && !signals.hasPhone ? ["phone" as const] : [];
+
+    return this.dedupeMissingFields([
+      ...preservedModelFields,
+      ...computedFields,
+      ...phoneField
+    ]);
   }
 
   private buildGuidedQuestion(
