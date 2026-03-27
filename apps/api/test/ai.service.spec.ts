@@ -455,4 +455,54 @@ describe("AiService fallback sales flow", () => {
     expect(decision.reply_text).toContain("2-комнат");
     expect(decision.reply_text.toLowerCase()).toContain("shortlist");
   });
+
+  it("handles price objection with a sales-oriented alternative framing", async () => {
+    const service = new AiService(env as never, catalog as never);
+
+    const decision = await service.decide("Дорого, хочу понять есть ли вариант помягче", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Для себя" },
+        { role: "user", content: "До 110 млн" },
+        { role: "user", content: "2 комнаты" }
+      ],
+      conversationText: "Для себя\nДо 110 млн\n2 комнаты\nДорого, хочу понять есть ли вариант помягче"
+    });
+
+    expect(decision.intent).toBe("unit_recommendation");
+    expect(decision.reply_text.toLowerCase()).toContain("цен");
+    expect(decision.reply_text.toLowerCase()).toContain("вход");
+    expect(decision.recommended_unit_ids).toEqual(["unit-1"]);
+  });
+
+  it("compares two units when the user explicitly asks to compare", async () => {
+    const secondUnit: Unit = {
+      ...unit,
+      id: "unit-2",
+      code: "BAD-2-614-13",
+      areaSqm: 61.4,
+      floor: 13,
+      priceRub: 83500000
+    };
+    const service = new AiService(env as never, catalog as never);
+
+    const decision = await service.decide("Сравни два варианта", {
+      activeProject: project,
+      candidateUnits: [secondUnit, unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Для себя" },
+        { role: "user", content: "100-120 млн" },
+        { role: "user", content: "2 комнаты" }
+      ],
+      conversationText: "Для себя\n100-120 млн\n2 комнаты\nСравни два варианта"
+    });
+
+    expect(decision.intent).toBe("unit_recommendation");
+    expect(decision.reply_text).toContain("BAD-2-614-13");
+    expect(decision.reply_text).toContain("BAD-2-765-15");
+    expect(decision.reply_text.toLowerCase()).toContain("сравнивать");
+  });
 });

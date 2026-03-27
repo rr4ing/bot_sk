@@ -378,6 +378,45 @@ export class AiService {
       });
     }
 
+    if (turnIntent.wantsComparison && context.candidateUnits.length >= 2) {
+      return aiDecisionSchema.parse({
+        intent: "unit_recommendation",
+        reply_text: this.buildComparisonReply(persistentState, context),
+        recommended_unit_ids: recommendedIds,
+        lead_score: this.calculateLeadScore(persistentState, turnIntent, recommendedIds.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: [],
+        policy_flags: ["price_unverified"]
+      });
+    }
+
+    if ((turnIntent.hasPriceObjection || turnIntent.hasDiscountObjection) && context.candidateUnits.length > 0) {
+      return aiDecisionSchema.parse({
+        intent: "unit_recommendation",
+        reply_text: this.buildObjectionReply(persistentState, context, turnIntent),
+        recommended_unit_ids: recommendedIds,
+        lead_score: this.calculateLeadScore(persistentState, turnIntent, recommendedIds.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: [],
+        policy_flags: ["price_unverified"]
+      });
+    }
+
+    if (turnIntent.hasHesitation && context.candidateUnits.length > 0) {
+      return aiDecisionSchema.parse({
+        intent: "unit_recommendation",
+        reply_text: this.buildHesitationReply(persistentState, context),
+        recommended_unit_ids: recommendedIds,
+        lead_score: this.calculateLeadScore(persistentState, turnIntent, recommendedIds.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: [],
+        policy_flags: ["price_unverified"]
+      });
+    }
+
     if (shortlistReady && context.candidateUnits.length > 0) {
       return aiDecisionSchema.parse({
         intent: "unit_recommendation",
@@ -872,6 +911,63 @@ export class AiService {
     return `${summary} Данных уже достаточно, поэтому сразу покажу shortlist по ${projectName}. В первую очередь я бы смотрел ${first.code} — ${this.describeUnitShort(
       first
     )}. Почему: ${firstReason}.${secondHint}`;
+  }
+
+  private buildComparisonReply(state: ConversationState, context: DecisionContext) {
+    const [first, second] = context.candidateUnits;
+    const summary = this.buildKnownFactsSummary(state, context);
+
+    if (!first || !second) {
+      return this.buildShortlistReply(state, context);
+    }
+
+    const firstLabel = `${first.code} — ${this.describeUnitShort(first)}`;
+    const secondLabel = `${second.code} — ${this.describeUnitShort(second)}`;
+    const compareAngle =
+      first.priceRub === second.priceRub
+        ? "один чуть сильнее по формату, другой — по входному билету"
+        : first.priceRub < second.priceRub
+          ? "первый выглядит как более аккуратный вход по бюджету, второй — как апгрейд по качеству лота"
+          : "первый выглядит как апгрейд по качеству лота, второй — как более мягкий вход";
+
+    return `${summary} Если сравнивать предметно, я бы поставил рядом два варианта: ${firstLabel} и ${secondLabel}. Логика такая: ${compareAngle}. Если хотите, следующим сообщением разложу их по схеме «что лучше для жизни / что лучше для инвестиции / что выгоднее по входу».`;
+  }
+
+  private buildObjectionReply(
+    state: ConversationState,
+    context: DecisionContext,
+    turnIntent: TurnIntent
+  ) {
+    const [first, second] = context.candidateUnits;
+    const summary = this.buildKnownFactsSummary(state, context);
+
+    if (!first) {
+      return `${summary} Могу показать более мягкий вход по бюджету и отдельно — вариант посильнее по характеристикам.`;
+    }
+
+    const objectionLead = turnIntent.hasDiscountObjection
+      ? "Понимаю запрос на скидку."
+      : "Понимаю реакцию на цену.";
+    const firstBit = `${first.code} — ${this.describeUnitShort(first)}`;
+    const secondBit = second ? ` В запасе могу сразу показать и ${second.code} — ${this.describeUnitShort(second)}.` : "";
+
+    return `${objectionLead} В Бадаевском обычно лучше смотреть не абстрактно на цену, а на соотношение входа, формата и ликвидности. Из того, что сейчас ближе всего к вашему сценарию, я бы начал с ${firstBit}: ${this.buildSalesReason(
+      first,
+      state
+    )}.${secondBit} Если хотите, следующим сообщением покажу либо самый мягкий вход, либо лучший вариант за небольшой апгрейд бюджета.`;
+  }
+
+  private buildHesitationReply(state: ConversationState, context: DecisionContext) {
+    const [first] = context.candidateUnits;
+    const summary = this.buildKnownFactsSummary(state, context);
+
+    if (!first) {
+      return `${summary} Давайте без давления: могу просто сузить выбор до 1-2 сильных вариантов и коротко объяснить, на что смотреть в первую очередь.`;
+    }
+
+    return `${summary} Это нормальный этап. Чтобы не держать в голове весь рынок, я бы сейчас зафиксировал один базовый ориентир — ${first.code}, ${this.describeUnitShort(
+      first
+    )}. Так вам будет проще понять, что именно вы получаете за свой бюджет и стоит ли двигаться дальше. Если хотите, я коротко распишу плюсы и риски именно этого лота.`;
   }
 
   private calculateLeadScore(
