@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { LEAD_HOT_THRESHOLD } from "@builderbot/config";
+import { aiDecisionSchema, type AIDecision } from "@builderbot/domain";
 import { Prisma, Unit } from "@prisma/client";
 import { TelegramUpdate } from "./types";
 import { ConversationService } from "./conversation.service";
@@ -62,30 +63,35 @@ export class TelegramService {
     const activeProject =
       (await this.catalog.getProjectById(storedState?.activeProjectId)) ??
       (await this.catalog.getRelevantProject(conversationText));
-    const [candidateUnits, projectEntryUnit, knowledgeDocuments] = await Promise.all([
-      this.catalog.findCandidateUnits(conversationText),
-      this.catalog.findProjectEntryUnit(activeProject?.id),
-      this.knowledge.getRelevantDocuments(conversationText)
-    ]);
-    const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit);
     const conversationState = this.ai.deriveConversationState(normalizedMessageText, {
       activeProject,
-      candidateUnits: decisionUnits,
-      projectEntryUnit,
-      knowledgeDocuments,
+      candidateUnits: [],
+      projectEntryUnit: null,
+      knowledgeDocuments: [],
       history,
       conversationText,
       conversationState: storedState
     });
-    const decision = await this.ai.decide(normalizedMessageText, {
-      activeProject,
-      candidateUnits: decisionUnits,
-      projectEntryUnit,
-      knowledgeDocuments,
-      history,
-      conversationText,
-      conversationState
-    });
+    const [candidateUnits, projectEntryUnit, knowledgeDocuments, referencedUnit] =
+      await Promise.all([
+        this.catalog.findCandidateUnitsForState(conversationState, activeProject?.id),
+        this.catalog.findProjectEntryUnit(activeProject?.id),
+        this.knowledge.getRelevantDocuments(conversationText),
+        this.catalog.findReferencedUnit(normalizedMessageText, activeProject?.id)
+      ]);
+    const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit, referencedUnit);
+    const decision =
+      referencedUnit && this.isReferencedUnitRequest(normalizedMessageText)
+        ? this.buildReferencedUnitDecision(referencedUnit, activeProject?.name ?? null)
+        : await this.ai.decide(normalizedMessageText, {
+            activeProject,
+            candidateUnits: decisionUnits,
+            projectEntryUnit,
+            knowledgeDocuments,
+            history,
+            conversationText,
+            conversationState
+          });
     const safeDecision = this.policy.enforce(decision, decisionUnits);
 
     await this.conversations.appendMessage(
@@ -150,10 +156,11 @@ export class TelegramService {
       });
     }
 
-    await this.telegramClient.sendMessage({
-      chatId: String(update.message?.chat.id),
-      text: safeDecision.reply_text
-    });
+    await this.sendDecisionReply(
+      String(update.message?.chat.id),
+      safeDecision,
+      referencedUnit && this.isReferencedUnitRequest(normalizedMessageText) ? referencedUnit : null
+    );
 
     return {
       status: "processed",
@@ -186,14 +193,22 @@ export class TelegramService {
       .join("\n");
   }
 
-  private mergeUnits(candidateUnits: Unit[], projectEntryUnit?: Unit | null) {
-    if (!projectEntryUnit) {
-      return candidateUnits;
+  private mergeUnits(
+    candidateUnits: Unit[],
+    projectEntryUnit?: Unit | null,
+    referencedUnit?: Unit | null
+  ) {
+    const merged = [...candidateUnits];
+
+    if (projectEntryUnit) {
+      merged.push(projectEntryUnit);
     }
 
-    return Array.from(
-      new Map([...candidateUnits, projectEntryUnit].map((unit) => [unit.id, unit])).values()
-    );
+    if (referencedUnit) {
+      merged.push(referencedUnit);
+    }
+
+    return Array.from(new Map(merged.map((unit) => [unit.id, unit])).values());
   }
 
   private normalizeInboundText(messageText: string) {
@@ -240,6 +255,75 @@ export class TelegramService {
       ...base,
       ...patch
     };
+  }
+
+  private isReferencedUnitRequest(messageText: string) {
+    const normalized = messageText.toLowerCase();
+
+    return [
+      "планиров",
+      "план ",
+      "схем",
+      "фото",
+      "фотку",
+      "изображ",
+      "подроб",
+      "подробнее",
+      "инфо",
+      "информац",
+      "по лоту",
+      "по квартире",
+      "скинь",
+      "пришли",
+      "расскажи по"
+    ].some((token) => normalized.includes(token));
+  }
+
+  private buildReferencedUnitDecision(unit: Unit, projectName: string | null): AIDecision {
+    const roomsLabel = unit.rooms === 0 ? "студия" : `${unit.rooms}-комнатная квартира`;
+    const perks = unit.perks.slice(0, 3).join(", ");
+    const projectLabel = projectName ? `в ${projectName}` : "в проекте";
+    const planNote = unit.planImageUrls.length
+      ? "Ниже отправляю планировку по этому лоту."
+      : unit.listingUrl
+        ? `Планировка в чат пока не загружена, но есть карточка лота: ${unit.listingUrl}`
+        : "Планировка в каталог пока не загружена, поэтому сейчас отправляю подробную карточку по лоту.";
+
+    return aiDecisionSchema.parse({
+      intent: "unit_recommendation",
+      reply_text: `По лоту ${unit.code} ${projectLabel}: ${roomsLabel}, ${unit.areaSqm} м², ${unit.floor}-й этаж, ${this.formatRub(unit.priceRub)}, отделка — ${unit.finishing}. ${
+        perks ? `Из сильных сторон: ${perks}. ` : ""
+      }${planNote}`,
+      recommended_unit_ids: [unit.id],
+      lead_score: 78,
+      handoff_required: false,
+      support_ticket_required: false,
+      missing_fields: [],
+      policy_flags: ["price_unverified"]
+    });
+  }
+
+  private async sendDecisionReply(chatId: string, decision: AIDecision, referencedUnit?: Unit | null) {
+    await this.telegramClient.sendMessage({
+      chatId,
+      text: decision.reply_text
+    });
+
+    if (!referencedUnit?.planImageUrls?.length) {
+      return;
+    }
+
+    for (const [index, imageUrl] of referencedUnit.planImageUrls.entries()) {
+      await this.telegramClient.sendPhoto({
+        chatId,
+        photoUrl: imageUrl,
+        caption: index === 0 ? `Планировка ${referencedUnit.code}` : undefined
+      });
+    }
+  }
+
+  private formatRub(value: number) {
+    return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
   }
 
 }

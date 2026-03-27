@@ -23,6 +23,8 @@ const unitInputSchema = z.object({
   finishing: z.string().min(2),
   status: z.enum(["available", "reserved", "sold"]).default("available"),
   availableFrom: z.string().datetime().optional(),
+  listingUrl: z.string().url().optional(),
+  planImageUrls: z.array(z.string().url()).default([]),
   perks: z.array(z.string()).default([]),
   notes: z.string().optional()
 });
@@ -110,33 +112,68 @@ export class CatalogService {
     const parsedBudget = this.extractBudget(messageText);
     const parsedRooms = this.extractRooms(messageText);
     const project = await this.getRelevantProject(messageText);
-    const where: Prisma.UnitWhereInput = {
+    return this.findCandidateUnitsForState(
+      {
+        budgetRub: parsedBudget,
+        rooms: parsedRooms
+      },
+      project?.id
+    );
+  }
+
+  async findCandidateUnitsForState(
+    state: {
+      budgetRub: number | null;
+      rooms: number | null;
+    },
+    projectId?: string | null
+  ) {
+    const baseWhere: Prisma.UnitWhereInput = {
       status: "available",
       priceRub: {
         gt: 0
-      }
+      },
+      ...(projectId ? { projectId } : {}),
+      ...(state.rooms !== null ? { rooms: state.rooms } : {})
     };
 
-    if (parsedBudget) {
-      where.priceRub = { gt: 0, lte: parsedBudget };
+    if (!state.budgetRub) {
+      return this.prisma.unit.findMany({
+        where: baseWhere,
+        include: { project: true },
+        take: 6,
+        orderBy: [{ priceRub: "asc" }, { areaSqm: "desc" }]
+      });
     }
 
-    if (parsedRooms !== null) {
-      where.rooms = parsedRooms;
-    }
-
-    if (project) {
-      where.projectId = project.id;
-    }
-
-    const units = await this.prisma.unit.findMany({
-      where,
+    const inBudget = await this.prisma.unit.findMany({
+      where: {
+        ...baseWhere,
+        priceRub: {
+          gt: 0,
+          lte: state.budgetRub
+        }
+      },
       include: { project: true },
       take: 6,
       orderBy: [{ priceRub: "asc" }, { areaSqm: "desc" }]
     });
 
-    return units;
+    if (inBudget.length > 0) {
+      return inBudget;
+    }
+
+    return this.prisma.unit.findMany({
+      where: {
+        ...baseWhere,
+        priceRub: {
+          gt: state.budgetRub
+        }
+      },
+      include: { project: true },
+      take: 3,
+      orderBy: [{ priceRub: "asc" }, { areaSqm: "asc" }]
+    });
   }
 
   async findProjectEntryUnit(projectId?: string | null) {
@@ -157,27 +194,64 @@ export class CatalogService {
     });
   }
 
+  async findReferencedUnit(messageText: string, projectId?: string | null) {
+    const directCode = this.extractUnitCode(messageText);
+
+    if (directCode) {
+      return this.prisma.unit.findFirst({
+        where: {
+          code: directCode,
+          ...(projectId ? { projectId } : {})
+        },
+        include: { project: true }
+      });
+    }
+
+    const shortCodeMatch = messageText.match(/\b(\d{3,4})\b/);
+
+    if (!shortCodeMatch) {
+      return null;
+    }
+
+    return this.prisma.unit.findFirst({
+      where: {
+        code: {
+          contains: `-${shortCodeMatch[1]}-`
+        },
+        ...(projectId ? { projectId } : {})
+      },
+      include: { project: true },
+      orderBy: { priceRub: "asc" }
+    });
+  }
+
   extractBudget(messageText: string) {
-    const normalized = messageText.toLowerCase().replace(/\s/g, "");
-    const rangeMatch = normalized.match(/(\d+(?:[.,]\d+)?)[-–](\d+(?:[.,]\d+)?)млн/);
+    const normalized = this.normalizeBudgetText(messageText);
+    const rangeMatch =
+      normalized.match(/(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)\s*млн\b/) ??
+      normalized.match(/млн\s*(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)/);
 
     if (rangeMatch) {
       return Math.round(Number(rangeMatch[2].replace(",", ".")) * 1_000_000);
     }
 
-    const upToMatch = normalized.match(/до(\d+(?:[.,]\d+)?)млн/);
+    const upToMatch = normalized.match(/до\s*(\d+(?:[.,]\d+)?)\s*млн\b/);
 
     if (upToMatch) {
       return Math.round(Number(upToMatch[1].replace(",", ".")) * 1_000_000);
     }
 
-    const plusMatch = normalized.match(/(\d+(?:[.,]\d+)?)\+млн/);
+    const plusMatch =
+      normalized.match(/(\d+(?:[.,]\d+)?)\s*\+\s*млн\b/) ??
+      normalized.match(/(\d+(?:[.,]\d+)?)\s*млн\+/);
 
     if (plusMatch) {
-      return 1_000_000_000;
+      return Math.round(Number(plusMatch[1].replace(",", ".")) * 1_000_000);
     }
 
-    const matchMillion = normalized.match(/(\d+(?:[.,]\d+)?)млн/);
+    const matchMillion =
+      normalized.match(/(\d+(?:[.,]\d+)?)\s*млн\b/) ??
+      normalized.match(/млн\s*(\d+(?:[.,]\d+)?)/);
 
     if (matchMillion) {
       return Math.round(Number(matchMillion[1].replace(",", ".")) * 1_000_000);
@@ -199,24 +273,73 @@ export class CatalogService {
       return 0;
     }
 
-    if (["однуш", "евро-2", "евродвуш"].some((token) => normalized.includes(token))) {
+    if (
+      [
+        "однуш",
+        "однокомнат",
+        "1-комнат",
+        "1 комнат",
+        "1к",
+        "евро-2",
+        "евродвуш"
+      ].some((token) => normalized.includes(token))
+    ) {
       return 1;
     }
 
-    if (["двуш", "евро-3", "евротреш"].some((token) => normalized.includes(token))) {
+    if (
+      [
+        "двуш",
+        "двухкомнат",
+        "2-комнат",
+        "2 комнат",
+        "2 комнаты",
+        "2к",
+        "евро-3",
+        "евротреш"
+      ].some((token) => normalized.includes(token))
+    ) {
       return 2;
     }
 
-    if (["треш", "трёш", "евро-4"].some((token) => normalized.includes(token))) {
+    if (
+      [
+        "треш",
+        "трёш",
+        "трехкомнат",
+        "трёхкомнат",
+        "3-комнат",
+        "3 комнат",
+        "3 комнаты",
+        "3к",
+        "евро-4"
+      ].some((token) => normalized.includes(token))
+    ) {
       return 3;
     }
 
-    const match = normalized.match(/([1-5])\s*[- ]?\s*(к|комн|комнат)/);
+    const match = normalized.match(/([1-5])\s*[- ]?\s*(к|кк|комн|комнат|комнаты)/);
     if (match) {
       return Number(match[1]);
     }
 
     return null;
+  }
+
+  private normalizeBudgetText(messageText: string) {
+    return messageText
+      .toLowerCase()
+      .replace(/руб(?:лей|ля|\.|)?/g, " ")
+      .replace(/₽/g, " ")
+      .replace(/миллионов|миллиона|миллион/g, " млн ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  extractUnitCode(messageText: string) {
+    const normalized = messageText.toUpperCase();
+    const codeMatch = normalized.match(/\b[A-ZА-Я]{2,5}-\d-\d{3,4}-\d{1,3}\b/);
+    return codeMatch?.[0] ?? null;
   }
 
   formatUnitsForPrompt(units: Unit[]) {

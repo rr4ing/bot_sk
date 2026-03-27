@@ -21,8 +21,9 @@ describe("TelegramService", () => {
       {
         getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
-        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findCandidateUnitsForState: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -46,7 +47,8 @@ describe("TelegramService", () => {
         enforce: jest.fn((decision) => decision)
       } as never,
       {
-        sendMessage: jest.fn()
+        sendMessage: jest.fn(),
+        sendPhoto: jest.fn()
       } as never,
       {
         syncLeadFromDecision: jest.fn().mockResolvedValue({ id: "lead-1" })
@@ -92,8 +94,9 @@ describe("TelegramService", () => {
       {
         getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
-        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findCandidateUnitsForState: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -117,7 +120,8 @@ describe("TelegramService", () => {
         enforce: jest.fn((decision) => decision)
       } as never,
       {
-        sendMessage
+        sendMessage,
+        sendPhoto: jest.fn()
       } as never,
       {
         syncLeadFromDecision: jest.fn().mockResolvedValue(null)
@@ -163,8 +167,9 @@ describe("TelegramService", () => {
       {
         getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
-        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findCandidateUnitsForState: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -188,7 +193,8 @@ describe("TelegramService", () => {
         enforce: jest.fn((decision) => decision)
       } as never,
       {
-        sendMessage
+        sendMessage,
+        sendPhoto: jest.fn()
       } as never,
       {
         syncLeadFromDecision: jest.fn().mockResolvedValue(null)
@@ -221,9 +227,20 @@ describe("TelegramService", () => {
 
   it("builds catalog context from conversation history, not just the latest quick reply", async () => {
     const getRelevantProject = jest.fn().mockResolvedValue(null);
-    const findCandidateUnits = jest.fn().mockResolvedValue([]);
+    const findCandidateUnitsForState = jest.fn().mockResolvedValue([]);
     const getRelevantDocuments = jest.fn().mockResolvedValue([]);
     const sendMessage = jest.fn();
+    const derivedState = {
+      purpose: "investment",
+      budgetRub: 20000000,
+      rooms: null,
+      timeline: null,
+      hasPhone: false,
+      activeProjectId: null,
+      activeProjectName: null,
+      lastUserMessage: "Бюджет до 20 млн",
+      updatedAt: new Date().toISOString()
+    };
     const decide = jest.fn().mockResolvedValue({
       intent: "clarify_needs",
       reply_text: "Уточню еще пару деталей.",
@@ -251,8 +268,9 @@ describe("TelegramService", () => {
       {
         getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject,
-        findCandidateUnits,
+        findCandidateUnitsForState,
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(20000000),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -260,14 +278,15 @@ describe("TelegramService", () => {
         getRelevantDocuments
       } as never,
       {
-        deriveConversationState: jest.fn().mockReturnValue(null),
+        deriveConversationState: jest.fn().mockReturnValue(derivedState),
         decide
       } as never,
       {
         enforce: jest.fn((decision) => decision)
       } as never,
       {
-        sendMessage
+        sendMessage,
+        sendPhoto: jest.fn()
       } as never,
       {
         syncLeadFromDecision: jest.fn().mockResolvedValue(null)
@@ -293,9 +312,7 @@ describe("TelegramService", () => {
     });
 
     expect(getRelevantProject).toHaveBeenCalledWith(expect.stringContaining("Бадаевский"));
-    expect(findCandidateUnits).toHaveBeenCalledWith(
-      expect.stringContaining("Покупаю для инвестиций")
-    );
+    expect(findCandidateUnitsForState).toHaveBeenCalledWith(derivedState, undefined);
     expect(getRelevantDocuments).toHaveBeenCalledWith(expect.stringContaining("Бюджет до 20 млн"));
     expect(decide).toHaveBeenCalledWith(
       "Бюджет до 20 млн",
@@ -330,8 +347,9 @@ describe("TelegramService", () => {
       {
         getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
-        findCandidateUnits: jest.fn().mockResolvedValue([]),
+        findCandidateUnitsForState: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(null),
         extractBudget: jest.fn().mockReturnValue(null),
         extractRooms: jest.fn().mockReturnValue(null)
       } as never,
@@ -346,7 +364,8 @@ describe("TelegramService", () => {
         enforce: jest.fn((decision) => decision)
       } as never,
       {
-        sendMessage: jest.fn()
+        sendMessage: jest.fn(),
+        sendPhoto: jest.fn()
       } as never,
       {
         syncLeadFromDecision: jest.fn().mockResolvedValue(null)
@@ -377,5 +396,99 @@ describe("TelegramService", () => {
         conversationText: expect.stringContaining("минимальную цену входа")
       })
     );
+  });
+
+  it("answers a referenced lot request directly and sends a floorplan when media is loaded", async () => {
+    const sendMessage = jest.fn();
+    const sendPhoto = jest.fn();
+    const referencedUnit = {
+      id: "unit-594",
+      projectId: "project-1",
+      code: "BAD-1-594-17",
+      rooms: 1,
+      floor: 17,
+      areaSqm: 59.4,
+      priceRub: 95590696,
+      finishing: "без отделки",
+      status: "available",
+      availableFrom: null,
+      listingUrl: "https://example.com/bad-1-594-17",
+      planImageUrls: ["https://example.com/plan-594.jpg"],
+      perks: ["панорамные виды"],
+      notes: null,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z")
+    };
+
+    const service = new TelegramService(
+      {
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-6", metadata: null }),
+        appendMessage: jest.fn(),
+        readConversationState: jest.fn().mockReturnValue(null),
+        getHistory: jest.fn().mockResolvedValue([{ role: "user", content: "по 594 скинь планировку" }]),
+        updateConversationSummary: jest.fn()
+      } as never,
+      {
+        getProjectById: jest.fn().mockResolvedValue(null),
+        getRelevantProject: jest.fn().mockResolvedValue({ id: "project-1", name: "Бадаевский" }),
+        findCandidateUnitsForState: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(referencedUnit),
+        extractBudget: jest.fn().mockReturnValue(null),
+        extractRooms: jest.fn().mockReturnValue(null)
+      } as never,
+      {
+        getRelevantDocuments: jest.fn().mockResolvedValue([])
+      } as never,
+      {
+        deriveConversationState: jest.fn().mockReturnValue({
+          purpose: null,
+          budgetRub: null,
+          rooms: null,
+          timeline: null,
+          hasPhone: false
+        }),
+        decide: jest.fn()
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage,
+        sendPhoto
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    await service.handleIncomingUpdate({
+      update_id: 6,
+      message: {
+        message_id: 6,
+        date: Date.now(),
+        text: "по 594 скинь планировку",
+        chat: { id: 60, type: "private" },
+        from: { id: 70, is_bot: false, first_name: "Лев" }
+      }
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("BAD-1-594-17")
+      })
+    );
+    expect(sendPhoto).toHaveBeenCalledWith({
+      chatId: "60",
+      photoUrl: "https://example.com/plan-594.jpg",
+      caption: "Планировка BAD-1-594-17"
+    });
   });
 });

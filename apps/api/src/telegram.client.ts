@@ -39,4 +39,37 @@ export class TelegramClient {
 
     return response.json();
   }
+
+  async sendPhoto(params: {
+    chatId: string;
+    photoUrl: string;
+    caption?: string;
+  }) {
+    if (!this.env.values.TELEGRAM_BOT_TOKEN) {
+      this.logger.warn("TELEGRAM_BOT_TOKEN is not configured, skipping outbound photo");
+      return { skipped: true };
+    }
+
+    const response = await fetch(
+      `https://api.telegram.org/bot${this.env.values.TELEGRAM_BOT_TOKEN}/sendPhoto`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          chat_id: params.chatId,
+          photo: params.photoUrl,
+          caption: params.caption
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      this.logger.error(`Telegram API sendPhoto failed: ${body}`);
+    }
+
+    return response.json();
+  }
 }

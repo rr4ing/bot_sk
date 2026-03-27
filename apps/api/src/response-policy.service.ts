@@ -13,6 +13,7 @@ export class ResponsePolicyService {
     const policyFlags = new Set(decision.policy_flags);
     let replyText = decision.reply_text.trim();
     let handoffRequired = decision.handoff_required;
+    const isSpecificLotReply = /^по лоту\s/i.test(replyText);
     const allowCatalogPreview =
       decision.intent === "unit_recommendation" ||
       (decision.intent === "handoff_manager" && decision.handoff_required);
@@ -43,7 +44,7 @@ export class ResponsePolicyService {
       });
     }
 
-    if (filteredUnits.length > 0) {
+    if (filteredUnits.length > 0 && !isSpecificLotReply) {
       const unitPreview = filteredUnits
         .map(
           (unit) =>

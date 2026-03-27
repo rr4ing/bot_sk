@@ -42,6 +42,8 @@ describe("AiService fallback sales flow", () => {
     finishing: "без отделки",
     status: "available",
     availableFrom: null,
+    listingUrl: null,
+    planImageUrls: [],
     perks: ["видовой этаж", "рядом Москва-Сити"],
     notes: "Тестовый лот",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),

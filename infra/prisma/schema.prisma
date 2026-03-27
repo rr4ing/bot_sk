@@ -83,6 +83,8 @@ model Unit {
   finishing     String
   status        UnitStatus @default(available)
   availableFrom DateTime?
+  listingUrl    String?
+  planImageUrls String[]   @default([])
   perks         String[]
   notes         String?
   createdAt     DateTime   @default(now())
