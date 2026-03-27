@@ -371,6 +371,7 @@ export class TelegramService {
     const roomsLabel = unit.rooms === 0 ? "студия" : `${unit.rooms}-комнатная квартира`;
     const perks = unit.perks.slice(0, 3).join(", ");
     const projectLabel = projectName ? `в ${projectName}` : "в проекте";
+    const listingNote = unit.listingUrl ? `Открытая карточка лота: ${unit.listingUrl}` : "";
     const planNote = unit.planImageUrls.length
       ? "Ниже отправляю карточку лота и планировку по этому варианту."
       : unit.listingUrl
@@ -381,7 +382,7 @@ export class TelegramService {
       intent: "unit_recommendation",
       reply_text: `По лоту ${unit.code} ${projectLabel}: ${roomsLabel}, ${unit.areaSqm} м², ${unit.floor}-й этаж, ${this.formatRub(unit.priceRub)}, отделка — ${unit.finishing}. ${
         perks ? `Из сильных сторон: ${perks}. ` : ""
-      }${planNote}`,
+      }${planNote}${listingNote ? `\n\n${listingNote}` : ""}`,
       recommended_unit_ids: [unit.id],
       lead_score: 78,
       handoff_required: false,
