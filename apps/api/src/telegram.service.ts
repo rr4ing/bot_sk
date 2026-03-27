@@ -88,6 +88,9 @@ export class TelegramService {
     const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit, referencedUnit);
     const lotFollowupRequested = this.isReferencedUnitRequest(normalizedMessageText);
     const explicitLotLookupRequested = this.isExplicitLotLookupRequest(normalizedMessageText);
+    const referencedLotRequested = Boolean(
+      referencedUnit && (lotFollowupRequested || explicitLotLookupRequested)
+    );
     const decision =
       referencedUnit && (lotFollowupRequested || explicitLotLookupRequested)
         ? this.buildReferencedUnitDecision(referencedUnit, activeProject?.name ?? null)
@@ -111,7 +114,7 @@ export class TelegramService {
         : null);
     const mediaUnit =
       referencedUnit ??
-      (lotFollowupRequested && safeDecision.recommended_unit_ids.length === 1
+      (referencedLotRequested && safeDecision.recommended_unit_ids.length === 1
         ? await this.catalog.getUnitById(safeDecision.recommended_unit_ids[0])
         : null);
 
@@ -184,7 +187,7 @@ export class TelegramService {
     await this.sendDecisionReply(
       String(update.message?.chat.id),
       safeDecision,
-      lotFollowupRequested ? mediaUnit : null
+      referencedLotRequested ? mediaUnit : null
     );
 
     return {

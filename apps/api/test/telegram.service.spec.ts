@@ -858,4 +858,137 @@ describe("TelegramService", () => {
       })
     );
   });
+
+  it("sends lot media when the user asks for a plan in the same message as an explicit lot code", async () => {
+    const sendMessage = jest.fn();
+    const sendPhoto = jest.fn();
+    const referencedUnit = {
+      id: "unit-765",
+      projectId: "project-1",
+      code: "BAD-2-765-15",
+      rooms: 2,
+      floor: 15,
+      areaSqm: 76.5,
+      priceRub: 107000000,
+      finishing: "не указано",
+      status: "available",
+      availableFrom: null,
+      listingUrl: "https://example.com/bad-2-765-15",
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-2-765-15-preview.jpg",
+        "/public/plans/badaevsky/BAD-2-765-15-plan.jpg"
+      ],
+      perks: ["видовой 15 этаж"],
+      notes: null,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z")
+    };
+
+    const service = new TelegramService(
+      {
+        ensureConversation: jest.fn().mockResolvedValue({
+          id: "conv-9",
+          metadata: {
+            conversation_state: {
+              purpose: "self_use",
+              budgetRub: 120000000,
+              rooms: 2,
+              timeline: "soon",
+              hasPhone: false,
+              activeProjectId: "project-1",
+              activeProjectName: "Бадаевский"
+            }
+          }
+        }),
+        appendMessage: jest.fn(),
+        readConversationState: jest.fn().mockReturnValue({
+          purpose: "self_use",
+          budgetRub: 120000000,
+          rooms: 2,
+          timeline: "soon",
+          hasPhone: false,
+          activeProjectId: "project-1",
+          activeProjectName: "Бадаевский"
+        }),
+        getHistory: jest.fn().mockResolvedValue([
+          { role: "user", content: "BAD-2-765-15: покажи план" }
+        ]),
+        updateConversationSummary: jest.fn()
+      } as never,
+      {
+        getProjectById: jest.fn().mockResolvedValue({ id: "project-1", name: "Бадаевский" }),
+        getRelevantProject: jest.fn().mockResolvedValue({ id: "project-1", name: "Бадаевский" }),
+        findCandidateUnitsForState: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(referencedUnit),
+        getUnitById: jest.fn().mockResolvedValue(referencedUnit),
+        extractBudget: jest.fn().mockReturnValue(120000000),
+        extractRooms: jest.fn().mockReturnValue(2),
+        extractUnitCode: jest
+          .fn()
+          .mockImplementation((message: string) =>
+            message.includes("BAD-2-765-15") ? "BAD-2-765-15" : null
+          )
+      } as never,
+      {
+        getRelevantDocuments: jest.fn().mockResolvedValue([])
+      } as never,
+      {
+        deriveConversationState: jest.fn().mockReturnValue({
+          purpose: "self_use",
+          budgetRub: 120000000,
+          rooms: 2,
+          timeline: "soon",
+          hasPhone: false,
+          activeProjectId: "project-1",
+          activeProjectName: "Бадаевский"
+        }),
+        decide: jest.fn()
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage,
+        sendPhoto
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    await service.handleIncomingUpdate({
+      update_id: 10,
+      message: {
+        message_id: 10,
+        date: Date.now(),
+        text: "BAD-2-765-15: покажи план",
+        chat: { id: 90, type: "private" },
+        from: { id: 100, is_bot: false, first_name: "Марк" }
+      }
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("BAD-2-765-15")
+      })
+    );
+    expect(sendPhoto).toHaveBeenNthCalledWith(1, {
+      chatId: "90",
+      photoUrl: "/public/plans/badaevsky/BAD-2-765-15-preview.jpg",
+      caption: "Карточка лота BAD-2-765-15"
+    });
+    expect(sendPhoto).toHaveBeenNthCalledWith(2, {
+      chatId: "90",
+      photoUrl: "/public/plans/badaevsky/BAD-2-765-15-plan.jpg",
+      caption: "Планировка BAD-2-765-15"
+    });
+  });
 });
