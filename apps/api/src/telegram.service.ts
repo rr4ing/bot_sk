@@ -86,12 +86,14 @@ export class TelegramService {
         })
       ]);
     const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit, referencedUnit);
+    const lotFollowupRequested = this.isReferencedUnitRequest(normalizedMessageText);
+    const explicitLotLookupRequested = this.isExplicitLotLookupRequest(normalizedMessageText);
     const decision =
-      referencedUnit && this.isReferencedUnitRequest(normalizedMessageText)
+      referencedUnit && (lotFollowupRequested || explicitLotLookupRequested)
         ? this.buildReferencedUnitDecision(referencedUnit, activeProject?.name ?? null)
         : this.isDirectShortlistRequest(normalizedMessageText, conversationState, candidateUnits)
           ? this.buildShortlistDecision(candidateUnits, activeProject?.name ?? null, conversationState)
-        : await this.ai.decide(normalizedMessageText, {
+          : await this.ai.decide(normalizedMessageText, {
             activeProject,
             candidateUnits: decisionUnits,
             projectEntryUnit,
@@ -105,6 +107,11 @@ export class TelegramService {
       referencedUnit ??
       decisionUnits.find((unit) => safeDecision.recommended_unit_ids.includes(unit.id)) ??
       (safeDecision.recommended_unit_ids[0]
+        ? await this.catalog.getUnitById(safeDecision.recommended_unit_ids[0])
+        : null);
+    const mediaUnit =
+      referencedUnit ??
+      (lotFollowupRequested && safeDecision.recommended_unit_ids.length === 1
         ? await this.catalog.getUnitById(safeDecision.recommended_unit_ids[0])
         : null);
 
@@ -177,7 +184,7 @@ export class TelegramService {
     await this.sendDecisionReply(
       String(update.message?.chat.id),
       safeDecision,
-      referencedUnit && this.isReferencedUnitRequest(normalizedMessageText) ? referencedUnit : null
+      lotFollowupRequested ? mediaUnit : null
     );
 
     return {
@@ -336,6 +343,30 @@ export class TelegramService {
     ].some((token) => normalized.includes(token));
   }
 
+  private isExplicitLotLookupRequest(messageText: string) {
+    const normalized = messageText.toLowerCase();
+    const hasExplicitCode = Boolean(
+      typeof (this.catalog as { extractUnitCode?: unknown }).extractUnitCode === "function"
+        ? this.catalog.extractUnitCode(messageText)
+        : messageText.toUpperCase().match(/\b[A-ZА-Я]{2,5}-\d-\d{3,4}-\d{1,3}\b/)?.[0]
+    );
+    const hasShortLotCode = /\b\d{3,4}\b/.test(messageText);
+    const asksAboutLot = [
+      "есть",
+      "по лоту",
+      "по квартире",
+      "что по",
+      "расскажи",
+      "инфо",
+      "информац",
+      "подроб",
+      "сколько",
+      "цена"
+    ].some((token) => normalized.includes(token));
+
+    return hasExplicitCode || (hasShortLotCode && asksAboutLot);
+  }
+
   private buildReferencedUnitDecision(unit: Unit, projectName: string | null): AIDecision {
     const roomsLabel = unit.rooms === 0 ? "студия" : `${unit.rooms}-комнатная квартира`;
     const perks = unit.perks.slice(0, 3).join(", ");
@@ -417,10 +448,16 @@ export class TelegramService {
     });
 
     if (!referencedUnit?.planImageUrls?.length) {
+      if (referencedUnit) {
+        this.logger.log(`No media attached for lot ${referencedUnit.code}, skipping sendPhoto`);
+      }
       return;
     }
 
     for (const [index, imageUrl] of referencedUnit.planImageUrls.entries()) {
+      this.logger.log(
+        `Sending media ${index + 1}/${referencedUnit.planImageUrls.length} for lot ${referencedUnit.code}: ${imageUrl}`
+      );
       await this.telegramClient.sendPhoto({
         chatId,
         photoUrl: imageUrl,

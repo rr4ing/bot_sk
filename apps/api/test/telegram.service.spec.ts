@@ -649,4 +649,213 @@ describe("TelegramService", () => {
       })
     );
   });
+
+  it("treats explicit lot code lookup as the active lot for subsequent follow-up requests", async () => {
+    const sendMessage = jest.fn();
+    const sendPhoto = jest.fn();
+    const referencedUnit = {
+      id: "unit-600",
+      projectId: "project-1",
+      code: "BAD-1-600-10",
+      rooms: 1,
+      floor: 10,
+      areaSqm: 60,
+      priceRub: 84000000,
+      finishing: "не указано",
+      status: "available",
+      availableFrom: null,
+      listingUrl: "https://example.com/bad-1-600-10",
+      planImageUrls: [
+        "https://example.com/bad-1-600-10-preview.jpg",
+        "https://example.com/bad-1-600-10-plan.jpg"
+      ],
+      perks: ["панорамное остекление"],
+      notes: null,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z")
+    };
+
+    const updateConversationSummary = jest.fn();
+    const decide = jest.fn();
+
+    const service = new TelegramService(
+      {
+        ensureConversation: jest
+          .fn()
+          .mockResolvedValueOnce({
+            id: "conv-8",
+            metadata: {
+              conversation_state: {
+                purpose: "investment",
+                budgetRub: 80000000,
+                rooms: 1,
+                timeline: null,
+                hasPhone: false,
+                activeProjectId: "project-1",
+                activeProjectName: "Бадаевский",
+                lastRecommendedUnitId: "unit-473",
+                lastRecommendedUnitCode: "BAD-1-473-13"
+              }
+            }
+          })
+          .mockResolvedValueOnce({
+            id: "conv-8",
+            metadata: {
+              conversation_state: {
+                purpose: "investment",
+                budgetRub: 80000000,
+                rooms: 1,
+                timeline: null,
+                hasPhone: false,
+                activeProjectId: "project-1",
+                activeProjectName: "Бадаевский",
+                lastRecommendedUnitId: "unit-600",
+                lastRecommendedUnitCode: "BAD-1-600-10"
+              }
+            }
+          }),
+        appendMessage: jest.fn(),
+        readConversationState: jest
+          .fn()
+          .mockReturnValueOnce({
+            purpose: "investment",
+            budgetRub: 80000000,
+            rooms: 1,
+            timeline: null,
+            hasPhone: false,
+            activeProjectId: "project-1",
+            activeProjectName: "Бадаевский",
+            lastRecommendedUnitId: "unit-473",
+            lastRecommendedUnitCode: "BAD-1-473-13"
+          })
+          .mockReturnValueOnce({
+            purpose: "investment",
+            budgetRub: 80000000,
+            rooms: 1,
+            timeline: null,
+            hasPhone: false,
+            activeProjectId: "project-1",
+            activeProjectName: "Бадаевский",
+            lastRecommendedUnitId: "unit-600",
+            lastRecommendedUnitCode: "BAD-1-600-10"
+          }),
+        getHistory: jest
+          .fn()
+          .mockResolvedValueOnce([{ role: "user", content: "BAD-1-600-10 есть?" }])
+          .mockResolvedValueOnce([
+            { role: "assistant", content: "Да, квартира BAD-1-600-10 есть в текущей экспозиции." },
+            { role: "user", content: "Дай мне планировку этой квартиры и всю инфу по ней" }
+          ]),
+        updateConversationSummary
+      } as never,
+      {
+        getProjectById: jest.fn().mockResolvedValue({ id: "project-1", name: "Бадаевский" }),
+        getRelevantProject: jest.fn().mockResolvedValue({ id: "project-1", name: "Бадаевский" }),
+        findCandidateUnitsForState: jest.fn().mockResolvedValue([]),
+        findProjectEntryUnit: jest.fn().mockResolvedValue(null),
+        findReferencedUnit: jest.fn().mockResolvedValue(referencedUnit),
+        getUnitById: jest.fn().mockResolvedValue(referencedUnit),
+        extractBudget: jest.fn().mockReturnValue(null),
+        extractRooms: jest.fn().mockReturnValue(null),
+        extractUnitCode: jest
+          .fn()
+          .mockImplementation((message: string) =>
+            message.includes("BAD-1-600-10") ? "BAD-1-600-10" : null
+          )
+      } as never,
+      {
+        getRelevantDocuments: jest.fn().mockResolvedValue([])
+      } as never,
+      {
+        deriveConversationState: jest
+          .fn()
+          .mockReturnValueOnce({
+            purpose: "investment",
+            budgetRub: 80000000,
+            rooms: 1,
+            timeline: null,
+            hasPhone: false,
+            activeProjectId: "project-1",
+            activeProjectName: "Бадаевский",
+            lastRecommendedUnitId: "unit-473",
+            lastRecommendedUnitCode: "BAD-1-473-13"
+          })
+          .mockReturnValueOnce({
+            purpose: "investment",
+            budgetRub: 80000000,
+            rooms: 1,
+            timeline: null,
+            hasPhone: false,
+            activeProjectId: "project-1",
+            activeProjectName: "Бадаевский",
+            lastRecommendedUnitId: "unit-600",
+            lastRecommendedUnitCode: "BAD-1-600-10"
+          }),
+        decide
+      } as never,
+      {
+        enforce: jest.fn((decision) => decision)
+      } as never,
+      {
+        sendMessage,
+        sendPhoto
+      } as never,
+      {
+        syncLeadFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        syncTicketFromDecision: jest.fn().mockResolvedValue(null)
+      } as never,
+      {
+        enqueueManagerNotification: jest.fn(),
+        enqueueKnowledgeEmbedding: jest.fn()
+      } as never
+    );
+
+    await service.handleIncomingUpdate({
+      update_id: 8,
+      message: {
+        message_id: 8,
+        date: Date.now(),
+        text: "BAD-1-600-10 есть?",
+        chat: { id: 80, type: "private" },
+        from: { id: 90, is_bot: false, first_name: "Ира" }
+      }
+    });
+
+    await service.handleIncomingUpdate({
+      update_id: 9,
+      message: {
+        message_id: 9,
+        date: Date.now(),
+        text: "Дай мне планировку этой квартиры и всю инфу по ней",
+        chat: { id: 80, type: "private" },
+        from: { id: 90, is_bot: false, first_name: "Ира" }
+      }
+    });
+
+    expect(decide).not.toHaveBeenCalled();
+    expect(sendPhoto).toHaveBeenNthCalledWith(1, {
+      chatId: "80",
+      photoUrl: "https://example.com/bad-1-600-10-preview.jpg",
+      caption: "Карточка лота BAD-1-600-10"
+    });
+    expect(sendPhoto).toHaveBeenNthCalledWith(2, {
+      chatId: "80",
+      photoUrl: "https://example.com/bad-1-600-10-plan.jpg",
+      caption: "Планировка BAD-1-600-10"
+    });
+    expect(updateConversationSummary).toHaveBeenLastCalledWith(
+      "conv-8",
+      expect.any(String),
+      expect.any(String),
+      expect.any(Number),
+      expect.objectContaining({
+        conversation_state: expect.objectContaining({
+          lastRecommendedUnitId: "unit-600",
+          lastRecommendedUnitCode: "BAD-1-600-10"
+        })
+      })
+    );
+  });
 });
