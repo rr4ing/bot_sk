@@ -59,7 +59,7 @@ export class TelegramClient {
         },
         body: JSON.stringify({
           chat_id: params.chatId,
-          photo: params.photoUrl,
+          photo: this.resolvePublicUrl(params.photoUrl),
           caption: params.caption
         })
       }
@@ -71,5 +71,16 @@ export class TelegramClient {
     }
 
     return response.json();
+  }
+
+  private resolvePublicUrl(input: string) {
+    if (/^https?:\/\//i.test(input)) {
+      return input;
+    }
+
+    const normalizedPath = input.startsWith("/") ? input : `/${input}`;
+    const baseUrl = this.env.values.APP_PUBLIC_URL.replace(/\/$/, "");
+
+    return `${baseUrl}${normalizedPath}`;
   }
 }

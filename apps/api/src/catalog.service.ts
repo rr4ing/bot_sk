@@ -24,7 +24,7 @@ const unitInputSchema = z.object({
   status: z.enum(["available", "reserved", "sold"]).default("available"),
   availableFrom: z.string().datetime().optional(),
   listingUrl: z.string().url().optional(),
-  planImageUrls: z.array(z.string().url()).default([]),
+  planImageUrls: z.array(z.string().min(1)).default([]),
   perks: z.array(z.string()).default([]),
   notes: z.string().optional()
 });
