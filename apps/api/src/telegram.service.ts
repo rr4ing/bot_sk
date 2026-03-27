@@ -286,7 +286,7 @@ export class TelegramService {
     const perks = unit.perks.slice(0, 3).join(", ");
     const projectLabel = projectName ? `в ${projectName}` : "в проекте";
     const planNote = unit.planImageUrls.length
-      ? "Ниже отправляю планировку по этому лоту."
+      ? "Ниже отправляю карточку лота и планировку по этому варианту."
       : unit.listingUrl
         ? `Планировка в чат пока не загружена, но есть карточка лота: ${unit.listingUrl}`
         : "Планировка в каталог пока не загружена, поэтому сейчас отправляю подробную карточку по лоту.";
@@ -369,7 +369,12 @@ export class TelegramService {
       await this.telegramClient.sendPhoto({
         chatId,
         photoUrl: imageUrl,
-        caption: index === 0 ? `Планировка ${referencedUnit.code}` : undefined
+        caption:
+          index === 0
+            ? `Карточка лота ${referencedUnit.code}`
+            : index === 1
+              ? `Планировка ${referencedUnit.code}`
+              : undefined
       });
     }
   }

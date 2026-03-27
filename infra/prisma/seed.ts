@@ -94,173 +94,230 @@ async function main() {
     skipDuplicates: true
   });
 
-  await prisma.unit.createMany({
-    data: [
-      {
-        code: "BAD-3-1401-17",
-        projectId: badaevskyProject.id,
-        rooms: 3,
-        floor: 17,
-        areaSqm: 140.1,
-        priceRub: 239453936,
-        finishing: "не указано",
-        status: "available",
-        perks: [
-          "вид на Москва-Сити",
-          "премиальный проект Capital Group",
-          "первая линия реки",
-          "архитектура Herzog & de Meuron"
-        ],
-        notes:
-          "Источник: Яндекс Недвижимость, offer id 6882360738130267681. 3-комнатная квартира, 140.1 м2, 17 этаж из 18, первичная продажа."
-      },
-      {
-        code: "BAD-3-1295-14",
-        projectId: badaevskyProject.id,
-        rooms: 3,
-        floor: 14,
-        areaSqm: 129.5,
-        priceRub: 215010704,
-        finishing: "не указано",
-        status: "available",
-        perks: [
-          "видовой этаж",
-          "премиальный проект Capital Group",
-          "рядом Москва-Сити",
-          "архитектура Herzog & de Meuron"
-        ],
-        notes:
-          "Источник: Яндекс Недвижимость, агрегированная экспозиция ЖК Бадаевский. 3-комнатная квартира, 129.5 м2, 14 этаж из 18, ориентир цены 215 010 704 ₽."
-      },
-      {
-        code: "BAD-3-1341-10",
-        projectId: badaevskyProject.id,
-        rooms: 3,
-        floor: 10,
-        areaSqm: 134.1,
-        priceRub: 180564048,
-        finishing: "не указано",
-        status: "available",
-        perks: [
-          "большая кухня-гостиная",
-          "премиальный проект Capital Group",
-          "виды на реку и город",
-          "рядом Москва-Сити"
-        ],
-        notes:
-          "Источник: Яндекс Недвижимость, offer id по публичной экспозиции ЖК Бадаевский. 3-комнатная квартира, 134.1 м2, 10 этаж из 18, цена 180 564 048 ₽."
-      },
-      {
-        code: "BAD-1-473-13",
-        projectId: badaevskyProject.id,
-        rooms: 1,
-        floor: 13,
-        areaSqm: 47.3,
-        priceRub: 75080952,
-        finishing: "не указано",
-        status: "available",
-        perks: [
-          "входной однокомнатный лот",
-          "видовой 13 этаж",
-          "премиальный проект у реки",
-          "архитектура Herzog & de Meuron"
-        ],
-        notes:
-          "Источник: Яндекс Недвижимость. 1-комнатная квартира, 47.3 м2, 13 этаж из 18, цена 75 080 952 ₽, ЖК Бадаевский."
-      },
-      {
-        code: "BAD-1-594-17",
-        projectId: badaevskyProject.id,
-        rooms: 1,
-        floor: 17,
-        areaSqm: 59.4,
-        priceRub: 95590696,
-        finishing: "без отделки",
-        status: "available",
-        perks: [
-          "высокий 17 этаж",
-          "премиальный проект у Москвы-реки",
-          "панорамные виды",
-          "рядом Москва-Сити"
-        ],
-        notes:
-          "Источник: Яндекс Недвижимость, offer id 6427744428025022742. 1-комнатная квартира, 59.4 м2, 17 этаж из 18, цена 95 590 696 ₽, первичная продажа."
-      },
-      {
-        code: "BAD-1-600-10",
-        projectId: badaevskyProject.id,
-        rooms: 1,
-        floor: 10,
-        areaSqm: 60.0,
-        priceRub: 81363496,
-        finishing: "не указано",
-        status: "available",
-        perks: [
-          "компактный premium формат",
-          "видовой 10 этаж",
-          "индивидуальный балкон",
-          "панорамное остекление"
-        ],
-        notes:
-          "Источник: Яндекс Недвижимость. 1-комнатная квартира, 60.0 м2, 10 этаж из 18, публичный ориентир цены 81 363 496 ₽, ЖК Бадаевский."
-      },
-      {
-        code: "BAD-2-1445-14",
-        projectId: badaevskyProject.id,
-        rooms: 2,
-        floor: 14,
-        areaSqm: 144.5,
-        priceRub: 198983600,
-        finishing: "без отделки",
-        status: "available",
-        perks: [
-          "большая двухкомнатная планировка",
-          "видовой 14 этаж",
-          "первая линия реки",
-          "панорамные окна"
-        ],
-        notes:
-          "Источник: Яндекс Недвижимость. 2-комнатная квартира, 144.5 м2, 14 этаж из 18, цена 198 983 600 ₽, ЖК Бадаевский."
-      },
-      {
-        code: "BAD-2-614-13",
-        projectId: badaevskyProject.id,
-        rooms: 2,
-        floor: 13,
-        areaSqm: 61.4,
-        priceRub: 0,
-        finishing: "не указано",
-        status: "available",
-        perks: [
-          "компактная двухкомнатная планировка",
-          "13 этаж",
-          "лоджия",
-          "проект у реки"
-        ],
-        notes:
-          "Источник: скрин из Яндекс Недвижимости. 2-комнатная квартира, 61.4 м2, 13 этаж. Цена на момент занесения не подтверждена, нужно обновить вручную."
-      },
-      {
-        code: "BAD-2-765-15",
-        projectId: badaevskyProject.id,
-        rooms: 2,
-        floor: 15,
-        areaSqm: 76.5,
-        priceRub: 107000000,
-        finishing: "не указано",
-        status: "available",
-        perks: [
-          "видовой 15 этаж",
-          "двухкомнатный формат для жизни или инвестиции",
-          "премиальный проект у реки",
-          "рядом Москва-Сити"
-        ],
-        notes:
-          "Источник: скрин пользователя и ручное уточнение цены. 2-комнатная квартира, 76.5 м2, 15 этаж из 18, цена 107 000 000 ₽, ЖК Бадаевский."
-      }
-    ],
-    skipDuplicates: true
-  });
+  const oneRoomListingUrl =
+    "https://yandex.ru/realty/kupit/kvartira/novostroyki?erid=5C7FMwRgLbGKaoPdZeqndjTTd79qNriMdgXbpxmJsjD3mbYQsvYjJAGKoNwChVFd&geoid=213&newbuilding_id=%D0%96%D0%9A+%D0%91%D0%B0%D0%B4%D0%B0%D0%B5%D0%B2%D1%81%D0%BA%D0%B8%D0%B9-1990121&offer_rooms_count=1";
+  const twoRoomListingUrl =
+    "https://yandex.ru/realty/kupit/kvartira/novostroyki?erid=5C7FMwRgLbGKaoPdZeqndjTTd79qNriMdgXbpxmJsjD3mbYQsvYjJAGKoNwChVFd&geoid=213&newbuilding_id=%D0%96%D0%9A+%D0%91%D0%B0%D0%B4%D0%B0%D0%B5%D0%B2%D1%81%D0%BA%D0%B8%D0%B9-1990121&offer_rooms_count=2";
+  const threeRoomListingUrl =
+    "https://yandex.ru/realty/kupit/kvartira/novostroyki?erid=5C7FMwRgLbGKaoPdZeqndjTTd79qNriMdgXbpxmJsjD3mbYQsvYjJAGKoNwChVFd&geoid=213&newbuilding_id=%D0%96%D0%9A+%D0%91%D0%B0%D0%B4%D0%B0%D0%B5%D0%B2%D1%81%D0%BA%D0%B8%D0%B9-1990121&offer_rooms_count=3";
+
+  const badaevskyUnits = [
+    {
+      code: "BAD-3-1401-17",
+      projectId: badaevskyProject.id,
+      rooms: 3,
+      floor: 17,
+      areaSqm: 140.1,
+      priceRub: 309000000,
+      finishing: "не указано",
+      status: "available",
+      listingUrl: threeRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-3-1401-17-preview.jpg",
+        "/public/plans/badaevsky/BAD-3-1401-17-plan.jpg"
+      ],
+      perks: [
+        "вид на Москва-Сити",
+        "премиальный проект Capital Group",
+        "первая линия реки",
+        "архитектура Herzog & de Meuron"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 3-комнатная квартира, 140.1 м2, 17 этаж из 18, цена 309 000 000 ₽."
+    },
+    {
+      code: "BAD-3-1295-14",
+      projectId: badaevskyProject.id,
+      rooms: 3,
+      floor: 14,
+      areaSqm: 129.5,
+      priceRub: 215000000,
+      finishing: "не указано",
+      status: "available",
+      listingUrl: threeRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-3-1295-14-preview.jpg",
+        "/public/plans/badaevsky/BAD-3-1295-14-plan.jpg"
+      ],
+      perks: [
+        "видовой этаж",
+        "премиальный проект Capital Group",
+        "рядом Москва-Сити",
+        "архитектура Herzog & de Meuron"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 3-комнатная квартира, 129.5 м2, 14 этаж из 18, цена 215 000 000 ₽."
+    },
+    {
+      code: "BAD-3-1341-10",
+      projectId: badaevskyProject.id,
+      rooms: 3,
+      floor: 10,
+      areaSqm: 134.1,
+      priceRub: 180500000,
+      finishing: "не указано",
+      status: "available",
+      listingUrl: threeRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-3-1341-10-preview.jpg",
+        "/public/plans/badaevsky/BAD-3-1341-10-plan.jpg"
+      ],
+      perks: [
+        "большая кухня-гостиная",
+        "премиальный проект Capital Group",
+        "виды на реку и город",
+        "рядом Москва-Сити"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 3-комнатная квартира, 134.1 м2, 10 этаж из 18, цена 180 500 000 ₽."
+    },
+    {
+      code: "BAD-1-473-13",
+      projectId: badaevskyProject.id,
+      rooms: 1,
+      floor: 13,
+      areaSqm: 47.3,
+      priceRub: 75000000,
+      finishing: "не указано",
+      status: "available",
+      listingUrl: oneRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-1-473-13-preview.jpg",
+        "/public/plans/badaevsky/BAD-1-473-13-plan.jpg"
+      ],
+      perks: [
+        "входной однокомнатный лот",
+        "видовой 13 этаж",
+        "премиальный проект у реки",
+        "архитектура Herzog & de Meuron"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 1-комнатная квартира, 47.3 м2, 13 этаж из 18, цена 75 000 000 ₽."
+    },
+    {
+      code: "BAD-1-594-17",
+      projectId: badaevskyProject.id,
+      rooms: 1,
+      floor: 17,
+      areaSqm: 59.4,
+      priceRub: 95500000,
+      finishing: "без отделки",
+      status: "available",
+      listingUrl: oneRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-1-594-17-preview.jpg",
+        "/public/plans/badaevsky/BAD-1-594-17-plan.jpg"
+      ],
+      perks: [
+        "высокий 17 этаж",
+        "премиальный проект у Москвы-реки",
+        "панорамные виды",
+        "рядом Москва-Сити"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 1-комнатная квартира, 59.4 м2, 17 этаж из 18, цена 95 500 000 ₽."
+    },
+    {
+      code: "BAD-1-600-10",
+      projectId: badaevskyProject.id,
+      rooms: 1,
+      floor: 10,
+      areaSqm: 60.0,
+      priceRub: 84000000,
+      finishing: "не указано",
+      status: "available",
+      listingUrl: oneRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-1-600-10-preview.jpg",
+        "/public/plans/badaevsky/BAD-1-600-10-plan.jpg"
+      ],
+      perks: [
+        "компактный premium формат",
+        "видовой 10 этаж",
+        "индивидуальный балкон",
+        "панорамное остекление"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 1-комнатная квартира, 60.0 м2, 10 этаж из 18, цена 84 000 000 ₽."
+    },
+    {
+      code: "BAD-2-1445-14",
+      projectId: badaevskyProject.id,
+      rooms: 2,
+      floor: 14,
+      areaSqm: 144.5,
+      priceRub: 199000000,
+      finishing: "без отделки",
+      status: "available",
+      listingUrl: twoRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-2-1445-14-preview.jpg",
+        "/public/plans/badaevsky/BAD-2-1445-14-plan.jpg"
+      ],
+      perks: [
+        "большая двухкомнатная планировка",
+        "видовой 14 этаж",
+        "первая линия реки",
+        "панорамные окна"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 2-комнатная квартира, 144.5 м2, 14 этаж из 18, цена 199 000 000 ₽."
+    },
+    {
+      code: "BAD-2-614-13",
+      projectId: badaevskyProject.id,
+      rooms: 2,
+      floor: 13,
+      areaSqm: 61.4,
+      priceRub: 83500000,
+      finishing: "не указано",
+      status: "available",
+      listingUrl: twoRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-2-614-13-preview.jpg",
+        "/public/plans/badaevsky/BAD-2-614-13-plan.jpg"
+      ],
+      perks: [
+        "компактная двухкомнатная планировка",
+        "13 этаж",
+        "лоджия",
+        "проект у реки"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 2-комнатная квартира, 61.4 м2, 13 этаж из 18, цена 83 500 000 ₽."
+    },
+    {
+      code: "BAD-2-765-15",
+      projectId: badaevskyProject.id,
+      rooms: 2,
+      floor: 15,
+      areaSqm: 76.5,
+      priceRub: 107000000,
+      finishing: "не указано",
+      status: "available",
+      listingUrl: twoRoomListingUrl,
+      planImageUrls: [
+        "/public/plans/badaevsky/BAD-2-765-15-preview.jpg",
+        "/public/plans/badaevsky/BAD-2-765-15-plan.jpg"
+      ],
+      perks: [
+        "видовой 15 этаж",
+        "двухкомнатный формат для жизни или инвестиции",
+        "премиальный проект у реки",
+        "рядом Москва-Сити"
+      ],
+      notes:
+        "Источник: скрины пользователя и Яндекс Недвижимость. 2-комнатная квартира, 76.5 м2, 15 этаж из 18, цена 107 000 000 ₽."
+    }
+  ];
+
+  for (const unit of badaevskyUnits) {
+    await prisma.unit.upsert({
+      where: { code: unit.code },
+      update: unit,
+      create: unit
+    });
+  }
 
   const playbook = readFileSync(
     resolve(process.cwd(), "content/playbook/sales-playbook.md"),

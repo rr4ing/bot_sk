@@ -488,7 +488,7 @@ describe("TelegramService", () => {
     expect(sendPhoto).toHaveBeenCalledWith({
       chatId: "60",
       photoUrl: "https://example.com/plan-594.jpg",
-      caption: "Планировка BAD-1-594-17"
+      caption: "Карточка лота BAD-1-594-17"
     });
   });
 });
