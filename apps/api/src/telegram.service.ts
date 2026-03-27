@@ -83,6 +83,8 @@ export class TelegramService {
     const decision =
       referencedUnit && this.isReferencedUnitRequest(normalizedMessageText)
         ? this.buildReferencedUnitDecision(referencedUnit, activeProject?.name ?? null)
+        : this.isDirectShortlistRequest(normalizedMessageText, conversationState, candidateUnits)
+          ? this.buildShortlistDecision(candidateUnits, activeProject?.name ?? null, conversationState)
         : await this.ai.decide(normalizedMessageText, {
             activeProject,
             candidateUnits: decisionUnits,
@@ -296,6 +298,56 @@ export class TelegramService {
       }${planNote}`,
       recommended_unit_ids: [unit.id],
       lead_score: 78,
+      handoff_required: false,
+      support_ticket_required: false,
+      missing_fields: [],
+      policy_flags: ["price_unverified"]
+    });
+  }
+
+  private isDirectShortlistRequest(
+    messageText: string,
+    state: { budgetRub: number | null; rooms: number | null },
+    candidateUnits: Unit[]
+  ) {
+    const normalized = messageText.toLowerCase();
+
+    if (!candidateUnits.length || state.rooms === null) {
+      return false;
+    }
+
+    return [
+      "скинь",
+      "пришли",
+      "покажи",
+      "посмотрим",
+      "какой-нибудь лот",
+      "какой нибудь лот",
+      "вариант",
+      "варианты",
+      "подбери лот",
+      "интересный лот"
+    ].some((token) => normalized.includes(token));
+  }
+
+  private buildShortlistDecision(
+    candidateUnits: Unit[],
+    projectName: string | null,
+    state: { purpose?: string | null; budgetRub: number | null; rooms: number | null }
+  ): AIDecision {
+    const topUnits = candidateUnits.slice(0, 3);
+    const first = topUnits[0];
+    const projectLabel = projectName ? `в ${projectName}` : "в проекте";
+    const roomsLabel =
+      state.rooms === 0 ? "студию" : state.rooms ? `${state.rooms}-комнатный формат` : "подходящий формат";
+    const budgetLabel = state.budgetRub ? `с ориентиром около ${this.formatRub(state.budgetRub)}` : null;
+    const intentBits = [roomsLabel, budgetLabel].filter(Boolean).join(", ");
+
+    return aiDecisionSchema.parse({
+      intent: "unit_recommendation",
+      reply_text: `Понял, тогда сразу покажу несколько живых вариантов ${projectLabel}${intentBits ? `: ${intentBits}` : ""}. Начну с лота ${first.code} — ${first.rooms === 0 ? "студия" : `${first.rooms}-комнатная`}, ${first.areaSqm} м², ${first.floor}-й этаж, ${this.formatRub(first.priceRub)}. Если хотите, следующим сообщением могу подробно раскрыть любой код из списка и прислать планировку, если она загружена в каталог.`,
+      recommended_unit_ids: topUnits.map((unit) => unit.id),
+      lead_score: 74,
       handoff_required: false,
       support_ticket_required: false,
       missing_fields: [],

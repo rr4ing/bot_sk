@@ -27,7 +27,7 @@ export class TelegramClient {
         body: JSON.stringify({
           chat_id: params.chatId,
           text: params.text,
-          reply_markup: params.replyMarkup
+          reply_markup: params.replyMarkup ?? { remove_keyboard: true }
         })
       }
     );
