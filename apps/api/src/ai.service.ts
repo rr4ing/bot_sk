@@ -37,6 +37,7 @@ interface TurnIntent {
   hasPriceObjection: boolean;
   hasDiscountObjection: boolean;
   hasHesitation: boolean;
+  wantsRationale: boolean;
 }
 
 const PROMPT_FILE_PATH = resolve(
@@ -378,6 +379,19 @@ export class AiService {
       });
     }
 
+    if (turnIntent.wantsRationale && context.candidateUnits.length > 0) {
+      return aiDecisionSchema.parse({
+        intent: "unit_recommendation",
+        reply_text: this.buildRationaleReply(persistentState, context),
+        recommended_unit_ids: recommendedIds,
+        lead_score: this.calculateLeadScore(persistentState, turnIntent, recommendedIds.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: [],
+        policy_flags: ["price_unverified"]
+      });
+    }
+
     if (turnIntent.wantsComparison && context.candidateUnits.length >= 2) {
       return aiDecisionSchema.parse({
         intent: "unit_recommendation",
@@ -654,6 +668,14 @@ export class AiService {
         "не уверен",
         "боюсь",
         "отложу"
+      ]),
+      wantsRationale: this.containsAny(normalized, [
+        "почему этот",
+        "почему именно",
+        "почему его",
+        "в чем плюс",
+        "в чём плюс",
+        "почему этот вариант"
       ])
     };
   }
@@ -902,15 +924,23 @@ export class AiService {
     }
 
     const firstReason = this.buildSalesReason(first, state);
-    const secondHint = second
-      ? ` Если захотите сравнение, следующим сообщением разберу ещё ${second.code} — ${this.describeUnitShort(
-          second
-        )}.`
-      : "";
+    if (!second) {
+      return `${summary} Данных уже достаточно, поэтому сразу покажу shortlist по ${projectName}. В первую очередь я бы смотрел ${first.code} — ${this.describeUnitShort(
+        first
+      )}. Почему: ${firstReason}. Если хотите, следующим сообщением разберу по нему планировку, сильные стороны и где здесь главный смысл покупки.`;
+    }
 
-    return `${summary} Данных уже достаточно, поэтому сразу покажу shortlist по ${projectName}. В первую очередь я бы смотрел ${first.code} — ${this.describeUnitShort(
+    const secondReason = this.buildSalesReason(second, state);
+
+    return `${summary} Данных уже достаточно, поэтому сразу держу короткий shortlist из двух лотов по ${projectName}. Базовый вариант — ${first.code}: ${this.describeUnitShort(
       first
-    )}. Почему: ${firstReason}.${secondHint}`;
+    )}. Почему он сейчас выглядит первым номером: ${firstReason}. Запасной сценарий — ${second.code}: ${this.describeUnitShort(
+      second
+    )}. Его бы смотрел, если хотите ${this.describeAlternativeAngle(
+      first,
+      second,
+      state
+    )}; по сути там ставка на ${secondReason}. Если хотите, следующим сообщением честно скажу, какой из них я бы забирал первым под ваш сценарий.`;
   }
 
   private buildComparisonReply(state: ConversationState, context: DecisionContext) {
@@ -921,16 +951,44 @@ export class AiService {
       return this.buildShortlistReply(state, context);
     }
 
-    const firstLabel = `${first.code} — ${this.describeUnitShort(first)}`;
-    const secondLabel = `${second.code} — ${this.describeUnitShort(second)}`;
-    const compareAngle =
-      first.priceRub === second.priceRub
-        ? "один чуть сильнее по формату, другой — по входному билету"
-        : first.priceRub < second.priceRub
-          ? "первый выглядит как более аккуратный вход по бюджету, второй — как апгрейд по качеству лота"
-          : "первый выглядит как апгрейд по качеству лота, второй — как более мягкий вход";
+    const cheaper = first.priceRub <= second.priceRub ? first : second;
+    const stronger = cheaper.id === first.id ? second : first;
+    const betterForLife =
+      first.areaSqm === second.areaSqm
+        ? stronger
+        : first.areaSqm >= second.areaSqm
+          ? first
+          : second;
+    const betterForInvestment = cheaper;
 
-    return `${summary} Если сравнивать предметно, я бы поставил рядом два варианта: ${firstLabel} и ${secondLabel}. Логика такая: ${compareAngle}. Если хотите, следующим сообщением разложу их по схеме «что лучше для жизни / что лучше для инвестиции / что выгоднее по входу».`;
+    return `${summary} Если сравнивать предметно, я бы поставил рядом ${first.code} — ${this.describeUnitShort(
+      first
+    )} и ${second.code} — ${this.describeUnitShort(
+      second
+    )}. По входу мягче выглядит ${cheaper.code}, потому что там более аккуратный билет по бюджету. По силе самого продукта я бы внимательнее смотрел ${betterForLife.code}, потому что там ${this.describeLifestyleEdge(
+      betterForLife,
+      cheaper
+    )}. Если бы задача была больше про ${state.purpose === "investment" ? "ликвидность и вход" : "жизнь и качество лота"}, я бы первым обсуждал ${
+      state.purpose === "investment" ? betterForInvestment.code : betterForLife.code
+    }. Если хотите, следующим сообщением дам честный вердикт: какой из них брать первым и почему.`;
+  }
+
+  private buildRationaleReply(state: ConversationState, context: DecisionContext) {
+    const [first, second] = context.candidateUnits;
+    const summary = this.buildKnownFactsSummary(state, context);
+
+    if (!first) {
+      return `${summary} Здесь важно смотреть на сочетание цены входа, самого формата и ликвидности. Если хотите, я отберу 1-2 лота и скажу, какой из них реально выглядит сильнее.`;
+    }
+
+    const backupBit = second
+      ? ` В запасе я бы держал ${second.code}, если захотите сравнить основной и резервный сценарий.`
+      : "";
+
+    return `${summary} Если отвечать прямо, я бы выделил ${first.code}, потому что ${this.buildSalesReason(
+      first,
+      state
+    )}. По сути это тот случай, когда лот выглядит не просто подходящим по цифрам, а логичным под ваш сценарий покупки.${backupBit}`;
   }
 
   private buildObjectionReply(
@@ -949,12 +1007,27 @@ export class AiService {
       ? "Понимаю запрос на скидку."
       : "Понимаю реакцию на цену.";
     const firstBit = `${first.code} — ${this.describeUnitShort(first)}`;
-    const secondBit = second ? ` В запасе могу сразу показать и ${second.code} — ${this.describeUnitShort(second)}.` : "";
 
-    return `${objectionLead} В Бадаевском обычно лучше смотреть не абстрактно на цену, а на соотношение входа, формата и ликвидности. Из того, что сейчас ближе всего к вашему сценарию, я бы начал с ${firstBit}: ${this.buildSalesReason(
-      first,
+    if (!second) {
+      return `${objectionLead} В Бадаевском я бы смотрел не абстрактную цифру, а то, что именно вы получаете за этот бюджет. Сейчас ближе всего к вашему сценарию ${firstBit}: ${this.buildSalesReason(
+        first,
+        state
+      )}. Если хотите, следующим сообщением покажу либо более мягкий вход, либо объясню, где в этом лоте реальная ценность, а где переплаты нет.`;
+    }
+
+    const cheaper = first.priceRub <= second.priceRub ? first : second;
+    const stronger = cheaper.id === first.id ? second : first;
+    const upgradeDelta = Math.abs(stronger.priceRub - cheaper.priceRub);
+
+    return `${objectionLead} Я бы разложил это по двум сценариям. Если держим вход жёстче, первым смотрим ${cheaper.code} — ${this.describeUnitShort(
+      cheaper
+    )}: ${this.buildSalesReason(cheaper, state)}. Если готовы добавить около ${this.formatRub(
+      upgradeDelta
+    )}, тогда уже обсуждаем ${stronger.code} — там ставка на ${this.describeAlternativeAngle(
+      cheaper,
+      stronger,
       state
-    )}.${secondBit} Если хотите, следующим сообщением покажу либо самый мягкий вход, либо лучший вариант за небольшой апгрейд бюджета.`;
+    )}. Если хотите, следующим сообщением честно скажу, где здесь разумно экономить, а где лучше не резать бюджет.`;
   }
 
   private buildHesitationReply(state: ConversationState, context: DecisionContext) {
@@ -965,9 +1038,46 @@ export class AiService {
       return `${summary} Давайте без давления: могу просто сузить выбор до 1-2 сильных вариантов и коротко объяснить, на что смотреть в первую очередь.`;
     }
 
-    return `${summary} Это нормальный этап. Чтобы не держать в голове весь рынок, я бы сейчас зафиксировал один базовый ориентир — ${first.code}, ${this.describeUnitShort(
+    return `${summary} Это нормальный этап. Чтобы не держать в голове весь рынок, я бы сейчас зафиксировал один опорный вариант — ${first.code}, ${this.describeUnitShort(
       first
-    )}. Так вам будет проще понять, что именно вы получаете за свой бюджет и стоит ли двигаться дальше. Если хотите, я коротко распишу плюсы и риски именно этого лота.`;
+    )}. Так вы быстро поймёте, устраивает ли вас сам уровень продукта за этот бюджет. Если не зайдёт, следующим сообщением я сразу переведу вас на более мягкий вход или на более сильный лот без нового круга вопросов.`;
+  }
+
+  private describeAlternativeAngle(
+    primary: DecisionContext["candidateUnits"][number],
+    alternative: DecisionContext["candidateUnits"][number],
+    state: ConversationState
+  ) {
+    if (alternative.priceRub < primary.priceRub) {
+      return "чуть более мягкий вход по бюджету";
+    }
+
+    if (alternative.areaSqm > primary.areaSqm + 5) {
+      return state.purpose === "investment"
+        ? "более сильный формат, который проще защищать при перепродаже"
+        : "больше метража и более сильный формат для жизни";
+    }
+
+    if (alternative.floor > primary.floor) {
+      return "более высокий этаж и более статусное ощущение лота";
+    }
+
+    return "более сильный продукт при небольшом апгрейде бюджета";
+  }
+
+  private describeLifestyleEdge(
+    preferred: DecisionContext["candidateUnits"][number],
+    alternative: DecisionContext["candidateUnits"][number]
+  ) {
+    if (preferred.areaSqm > alternative.areaSqm + 5) {
+      return "больше полезного метража и комфортнее ощущается в жизни";
+    }
+
+    if (preferred.floor > alternative.floor) {
+      return "этаж выше и ощущение лота статуснее";
+    }
+
+    return "лот в целом выглядит сильнее по ощущению продукта";
   }
 
   private calculateLeadScore(

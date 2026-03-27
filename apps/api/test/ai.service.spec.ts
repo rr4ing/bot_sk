@@ -457,11 +457,19 @@ describe("AiService fallback sales flow", () => {
   });
 
   it("handles price objection with a sales-oriented alternative framing", async () => {
+    const secondUnit: Unit = {
+      ...unit,
+      id: "unit-2",
+      code: "BAD-2-614-13",
+      areaSqm: 61.4,
+      floor: 13,
+      priceRub: 83500000
+    };
     const service = new AiService(env as never, catalog as never);
 
     const decision = await service.decide("Дорого, хочу понять есть ли вариант помягче", {
       activeProject: project,
-      candidateUnits: [unit],
+      candidateUnits: [secondUnit, unit],
       knowledgeDocuments: [knowledgeDocument],
       history: [
         { role: "user", content: "Для себя" },
@@ -472,9 +480,11 @@ describe("AiService fallback sales flow", () => {
     });
 
     expect(decision.intent).toBe("unit_recommendation");
-    expect(decision.reply_text.toLowerCase()).toContain("цен");
+    expect(decision.reply_text.toLowerCase()).toContain("сценар");
     expect(decision.reply_text.toLowerCase()).toContain("вход");
-    expect(decision.recommended_unit_ids).toEqual(["unit-1"]);
+    expect(decision.reply_text).toContain("BAD-2-614-13");
+    expect(decision.reply_text).toContain("BAD-2-765-15");
+    expect(decision.recommended_unit_ids).toEqual(["unit-2", "unit-1"]);
   });
 
   it("compares two units when the user explicitly asks to compare", async () => {
@@ -503,6 +513,36 @@ describe("AiService fallback sales flow", () => {
     expect(decision.intent).toBe("unit_recommendation");
     expect(decision.reply_text).toContain("BAD-2-614-13");
     expect(decision.reply_text).toContain("BAD-2-765-15");
-    expect(decision.reply_text.toLowerCase()).toContain("сравнивать");
+    expect(decision.reply_text.toLowerCase()).toContain("по входу");
+    expect(decision.reply_text.toLowerCase()).toContain("если бы задача была");
+  });
+
+  it("explains why the lead unit is worth considering when asked directly", async () => {
+    const secondUnit: Unit = {
+      ...unit,
+      id: "unit-2",
+      code: "BAD-2-614-13",
+      areaSqm: 61.4,
+      floor: 13,
+      priceRub: 83500000
+    };
+    const service = new AiService(env as never, catalog as never);
+
+    const decision = await service.decide("Почему именно этот вариант?", {
+      activeProject: project,
+      candidateUnits: [unit, secondUnit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [
+        { role: "user", content: "Для себя" },
+        { role: "user", content: "100-120 млн" },
+        { role: "user", content: "2 комнаты" }
+      ],
+      conversationText: "Для себя\n100-120 млн\n2 комнаты\nПочему именно этот вариант?"
+    });
+
+    expect(decision.intent).toBe("unit_recommendation");
+    expect(decision.reply_text).toContain("BAD-2-765-15");
+    expect(decision.reply_text.toLowerCase()).toContain("логич");
+    expect(decision.reply_text).toContain("BAD-2-614-13");
   });
 });
