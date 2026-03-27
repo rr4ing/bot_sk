@@ -325,6 +325,19 @@ export class CatalogService {
 
   extractRooms(messageText: string) {
     const normalized = messageText.toLowerCase();
+    const preferredRangeMatch =
+      normalized.match(/лучше\s*([1-5])\s*[- ]?\s*(к|кк|комн|комнат|комнаты)?/) ??
+      normalized.match(/предпочтител[ьнно]*\s*([1-5])\s*[- ]?\s*(к|кк|комн|комнат|комнаты)?/);
+
+    if (preferredRangeMatch) {
+      return Number(preferredRangeMatch[1]);
+    }
+
+    const rangeMatch = normalized.match(/([1-5])\s*[-–]\s*([1-5])\s*(к|кк|комн|комнат|комнаты)/);
+    if (rangeMatch) {
+      return Number(rangeMatch[2]);
+    }
+
     const studios = ["студ", "studio"];
     if (studios.some((token) => normalized.includes(token))) {
       return 0;

@@ -432,10 +432,26 @@ export class TelegramService {
       state.rooms === 0 ? "студию" : state.rooms ? `${state.rooms}-комнатный формат` : "подходящий формат";
     const budgetLabel = state.budgetRub ? `с ориентиром около ${this.formatRub(state.budgetRub)}` : null;
     const intentBits = [roomsLabel, budgetLabel].filter(Boolean).join(", ");
+    const purposeLabel =
+      state.purpose === "investment"
+        ? "под инвестицию"
+        : state.purpose === "family"
+          ? "для семьи"
+          : state.purpose === "parents"
+            ? "для родителей"
+            : state.purpose === "self"
+              ? "для себя"
+              : "под ваш сценарий";
+    const budgetFit =
+      state.budgetRub && first.priceRub <= state.budgetRub
+        ? "он укладывается в ваш текущий ориентир по бюджету"
+        : state.budgetRub
+          ? "он выше вашего ориентира, но уже даёт вход в более сильный формат"
+          : null;
 
     return aiDecisionSchema.parse({
       intent: "unit_recommendation",
-      reply_text: `Понял, тогда сразу покажу несколько живых вариантов ${projectLabel}${intentBits ? `: ${intentBits}` : ""}. Начну с лота ${first.code} — ${first.rooms === 0 ? "студия" : `${first.rooms}-комнатная`}, ${first.areaSqm} м², ${first.floor}-й этаж, ${this.formatRub(first.priceRub)}. Если хотите, следующим сообщением могу подробно раскрыть любой код из списка и прислать планировку, если она загружена в каталог.`,
+      reply_text: `Понял, тогда сразу покажу несколько живых вариантов ${projectLabel}${intentBits ? `: ${intentBits}` : ""}. Под ваш сценарий ${purposeLabel} первым бы посмотрел ${first.code} — ${first.rooms === 0 ? "студия" : `${first.rooms}-комнатная`}, ${first.areaSqm} м², ${first.floor}-й этаж, ${this.formatRub(first.priceRub)}${budgetFit ? `; ${budgetFit}` : ""}. Если хотите, следующим сообщением могу подробно раскрыть любой код из списка и прислать планировку, если она загружена в каталог.`,
       recommended_unit_ids: topUnits.map((unit) => unit.id),
       lead_score: 74,
       handoff_required: false,

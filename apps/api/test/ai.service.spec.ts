@@ -424,4 +424,35 @@ describe("AiService fallback sales flow", () => {
     expect(decision.reply_text).toContain("быстро");
     expect(decision.missing_fields).toEqual([]);
   });
+
+  it("understands preferred room count and week-based urgency phrasing", async () => {
+    const smartCatalog = {
+      ...catalog,
+      extractRooms: jest.fn((text: string) => {
+        const normalized = text.toLowerCase();
+        if (normalized.includes("лучше 2")) {
+          return 2;
+        }
+        if (normalized.includes("1-2 комнат")) {
+          return 2;
+        }
+
+        return null;
+      })
+    };
+    const service = new AiService(env as never, smartCatalog as never);
+
+    const decision = await service.decide("100-120 млн, 1-2 комнаты, лучше 2. Решение за 1-2 недели.", {
+      activeProject: project,
+      candidateUnits: [unit],
+      knowledgeDocuments: [knowledgeDocument],
+      history: [{ role: "user", content: "Для себя" }],
+      conversationText: "Для себя\n100-120 млн, 1-2 комнаты, лучше 2. Решение за 1-2 недели."
+    });
+
+    expect(decision.intent).toBe("unit_recommendation");
+    expect(decision.reply_text).toContain("для себя");
+    expect(decision.reply_text).toContain("2-комнат");
+    expect(decision.reply_text.toLowerCase()).toContain("shortlist");
+  });
 });

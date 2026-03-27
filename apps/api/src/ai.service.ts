@@ -381,10 +381,7 @@ export class AiService {
     if (shortlistReady && context.candidateUnits.length > 0) {
       return aiDecisionSchema.parse({
         intent: "unit_recommendation",
-        reply_text: `${this.buildKnownFactsSummary(
-          persistentState,
-          context
-        )} Данных уже достаточно, поэтому сразу покажу самые релевантные варианты и коротко объясню, почему именно они подходят.`,
+        reply_text: this.buildShortlistReply(persistentState, context),
         recommended_unit_ids: recommendedIds,
         lead_score: this.calculateLeadScore(persistentState, turnIntent, recommendedIds.length),
         handoff_required: false,
@@ -506,7 +503,7 @@ export class AiService {
       normalized = aiDecisionSchema.parse({
         ...normalized,
         intent: "unit_recommendation",
-        reply_text: `${knownFactsSummary} Данных уже достаточно, поэтому сразу покажу самые релевантные варианты и коротко поясню, почему они подходят именно под ваш сценарий.`,
+        reply_text: this.buildShortlistReply(persistentState, context),
         recommended_unit_ids:
           normalized.recommended_unit_ids.length > 0
             ? normalized.recommended_unit_ids
@@ -728,7 +725,11 @@ export class AiService {
         "на этой неделе",
         "на следующей неделе",
         "на след неделе",
-        "до месяца"
+        "до месяца",
+        "1-2 недели",
+        "1 2 недели",
+        "две недели",
+        "пара недель"
       ])
     ) {
       return "urgent";
@@ -852,6 +853,27 @@ export class AiService {
     return `${projectPrefix}уточню ещё один момент, чтобы подбор был предметным, а не общим.`;
   }
 
+  private buildShortlistReply(state: ConversationState, context: DecisionContext) {
+    const [first, second] = context.candidateUnits;
+    const projectName = context.activeProject?.name ?? "проект";
+    const summary = this.buildKnownFactsSummary(state, context);
+
+    if (!first) {
+      return `${summary} Могу сразу сузить подбор до 2-3 сильных вариантов и подсветить, какой из них лучше под ваш сценарий.`;
+    }
+
+    const firstReason = this.buildSalesReason(first, state);
+    const secondHint = second
+      ? ` Если захотите сравнение, следующим сообщением разберу ещё ${second.code} — ${this.describeUnitShort(
+          second
+        )}.`
+      : "";
+
+    return `${summary} Данных уже достаточно, поэтому сразу покажу shortlist по ${projectName}. В первую очередь я бы смотрел ${first.code} — ${this.describeUnitShort(
+      first
+    )}. Почему: ${firstReason}.${secondHint}`;
+  }
+
   private calculateLeadScore(
     state: ConversationState,
     turnIntent: TurnIntent,
@@ -927,6 +949,54 @@ export class AiService {
     }
 
     return `Понял: ${facts.join(", ")}.`;
+  }
+
+  private buildSalesReason(unit: DecisionContext["candidateUnits"][number], state: ConversationState) {
+    const reasons: string[] = [];
+
+    if (state.purpose === "investment") {
+      reasons.push("такой формат обычно лучше читается по ликвидности и спросу на аренду");
+    } else if (state.purpose === "family") {
+      reasons.push("это выглядит как сильный семейный формат без лишней переплаты за метраж");
+    } else if (state.purpose === "parents") {
+      reasons.push("это понятный и комфортный вариант под покупку для родителей");
+    } else {
+      reasons.push("это один из самых сбалансированных вариантов для жизни");
+    }
+
+    if (state.budgetRub) {
+      reasons.push(this.describeBudgetFit(unit.priceRub, state.budgetRub));
+    }
+
+    if (unit.perks[0]) {
+      reasons.push(`из бонусов — ${unit.perks[0]}`);
+    }
+
+    return reasons.join(", ");
+  }
+
+  private describeBudgetFit(priceRub: number, budgetRub: number) {
+    if (priceRub <= budgetRub) {
+      const delta = budgetRub - priceRub;
+      if (delta <= 5_000_000) {
+        return "лот почти в верхней границе вашего бюджета";
+      }
+
+      return "лот уверенно укладывается в ваш бюджет";
+    }
+
+    const overshoot = priceRub - budgetRub;
+    if (overshoot <= 10_000_000) {
+      return "он чуть выше вашего ориентира, но ещё выглядит как разумный апгрейд бюджета";
+    }
+
+    return "он заметно выше текущего ориентира, так что его стоит смотреть только если готовы расширить бюджет";
+  }
+
+  private describeUnitShort(unit: DecisionContext["candidateUnits"][number]) {
+    return `${unit.rooms === 0 ? "студия" : `${unit.rooms}-комнатная`}, ${unit.areaSqm} м², ${
+      unit.floor
+    }-й этаж, ${this.formatRub(unit.priceRub)}`;
   }
 
   private isReaskingKnownInfo(replyText: string, state: ConversationState) {
