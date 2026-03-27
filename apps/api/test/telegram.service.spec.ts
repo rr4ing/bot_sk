@@ -10,14 +10,16 @@ describe("TelegramService", () => {
     };
     const service = new TelegramService(
       {
-        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-1" }),
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-1", metadata: null }),
         appendMessage,
+        readConversationState: jest.fn().mockReturnValue(null),
         getHistory: jest.fn().mockResolvedValue([
           { role: "user", content: "Нужен срочный подбор, перезвоните сегодня" }
         ]),
         updateConversationSummary
       } as never,
       {
+        getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
         findCandidateUnits: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
@@ -28,6 +30,7 @@ describe("TelegramService", () => {
         getRelevantDocuments: jest.fn().mockResolvedValue([])
       } as never,
       {
+        deriveConversationState: jest.fn().mockReturnValue(null),
         decide: jest.fn().mockResolvedValue({
           intent: "handoff_manager",
           reply_text: "Подключаю менеджера.",
@@ -80,12 +83,14 @@ describe("TelegramService", () => {
     const sendMessage = jest.fn();
     const service = new TelegramService(
       {
-        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-2" }),
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-2", metadata: null }),
         appendMessage: jest.fn(),
+        readConversationState: jest.fn().mockReturnValue(null),
         getHistory: jest.fn().mockResolvedValue([{ role: "user", content: "Подберите квартиру" }]),
         updateConversationSummary: jest.fn()
       } as never,
       {
+        getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
         findCandidateUnits: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
@@ -96,6 +101,7 @@ describe("TelegramService", () => {
         getRelevantDocuments: jest.fn().mockResolvedValue([])
       } as never,
       {
+        deriveConversationState: jest.fn().mockReturnValue(null),
         decide: jest.fn().mockResolvedValue({
           intent: "sales_qualification",
           reply_text: "Помогу с подбором. Для чего покупаете?",
@@ -148,12 +154,14 @@ describe("TelegramService", () => {
     const sendMessage = jest.fn();
     const service = new TelegramService(
       {
-        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-dup" }),
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-dup", metadata: null }),
         appendMessage: jest.fn(),
+        readConversationState: jest.fn().mockReturnValue(null),
         getHistory: jest.fn().mockResolvedValue([{ role: "user", content: "Привет" }]),
         updateConversationSummary: jest.fn()
       } as never,
       {
+        getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
         findCandidateUnits: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
@@ -164,6 +172,7 @@ describe("TelegramService", () => {
         getRelevantDocuments: jest.fn().mockResolvedValue([])
       } as never,
       {
+        deriveConversationState: jest.fn().mockReturnValue(null),
         decide: jest.fn().mockResolvedValue({
           intent: "sales_qualification",
           reply_text: "Здравствуйте! Для чего покупаете?",
@@ -228,8 +237,9 @@ describe("TelegramService", () => {
 
     const service = new TelegramService(
       {
-        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-3" }),
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-3", metadata: null }),
         appendMessage: jest.fn(),
+        readConversationState: jest.fn().mockReturnValue(null),
         getHistory: jest.fn().mockResolvedValue([
           { role: "user", content: "Интересен Бадаевский" },
           { role: "assistant", content: "Для чего рассматриваете покупку?" },
@@ -239,6 +249,7 @@ describe("TelegramService", () => {
         updateConversationSummary: jest.fn()
       } as never,
       {
+        getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject,
         findCandidateUnits,
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
@@ -249,6 +260,7 @@ describe("TelegramService", () => {
         getRelevantDocuments
       } as never,
       {
+        deriveConversationState: jest.fn().mockReturnValue(null),
         decide
       } as never,
       {
@@ -307,14 +319,16 @@ describe("TelegramService", () => {
 
     const service = new TelegramService(
       {
-        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-5" }),
+        ensureConversation: jest.fn().mockResolvedValue({ id: "conv-5", metadata: null }),
         appendMessage: jest.fn(),
+        readConversationState: jest.fn().mockReturnValue(null),
         getHistory: jest
           .fn()
           .mockResolvedValue([{ role: "user", content: "Самый выгодный вход" }]),
         updateConversationSummary: jest.fn()
       } as never,
       {
+        getProjectById: jest.fn().mockResolvedValue(null),
         getRelevantProject: jest.fn().mockResolvedValue(null),
         findCandidateUnits: jest.fn().mockResolvedValue([]),
         findProjectEntryUnit: jest.fn().mockResolvedValue(null),
@@ -325,6 +339,7 @@ describe("TelegramService", () => {
         getRelevantDocuments: jest.fn().mockResolvedValue([])
       } as never,
       {
+        deriveConversationState: jest.fn().mockReturnValue(null),
         decide
       } as never,
       {

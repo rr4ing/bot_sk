@@ -3,7 +3,7 @@ import { ResponsePolicyService } from "../src/response-policy.service";
 describe("ResponsePolicyService", () => {
   const service = new ResponsePolicyService();
 
-  it("filters unknown units and forces handoff", () => {
+  it("filters unknown units and keeps reply while flagging availability risk", () => {
     const result = service.enforce(
       {
         intent: "unit_recommendation",
@@ -31,7 +31,7 @@ describe("ResponsePolicyService", () => {
     );
 
     expect(result.recommended_unit_ids).toEqual(["unit-1"]);
-    expect(result.handoff_required).toBe(true);
+    expect(result.handoff_required).toBe(false);
     expect(result.policy_flags).toContain("availability_unverified");
   });
 

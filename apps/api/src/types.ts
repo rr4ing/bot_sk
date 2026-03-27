@@ -1,5 +1,20 @@
 import type { KnowledgeDocument, Project, Unit } from "@prisma/client";
 
+export type PurchasePurpose = "self" | "family" | "investment" | "parents" | null;
+export type PurchaseTimeline = "urgent" | "soon" | "later" | null;
+
+export interface ConversationState {
+  purpose: PurchasePurpose;
+  budgetRub: number | null;
+  rooms: number | null;
+  timeline: PurchaseTimeline;
+  hasPhone: boolean;
+  activeProjectId?: string | null;
+  activeProjectName?: string | null;
+  lastUserMessage?: string | null;
+  updatedAt?: string | null;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: {
@@ -32,4 +47,5 @@ export interface DecisionContext {
   knowledgeDocuments: KnowledgeDocument[];
   history: Array<{ role: "user" | "assistant"; content: string }>;
   conversationText?: string;
+  conversationState?: ConversationState | null;
 }

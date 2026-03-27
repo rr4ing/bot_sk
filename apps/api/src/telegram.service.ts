@@ -1,7 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { LEAD_HOT_THRESHOLD } from "@builderbot/config";
-import { Unit, Project } from "@prisma/client";
-import type { AIDecision } from "@builderbot/domain";
+import { Prisma, Unit } from "@prisma/client";
 import { TelegramUpdate } from "./types";
 import { ConversationService } from "./conversation.service";
 import { CatalogService } from "./catalog.service";
@@ -54,25 +53,38 @@ export class TelegramService {
       .join(" ")
       .trim();
     const phone = update.message?.contact?.phone_number ?? null;
+    const storedState = this.conversations.readConversationState(conversation.metadata);
 
     await this.conversations.appendMessage(conversation.id, "user", messageText, update);
 
     const history = await this.conversations.getHistory(conversation.id);
     const conversationText = this.buildDecisionText(history);
-    const activeProject = await this.catalog.getRelevantProject(conversationText);
+    const activeProject =
+      (await this.catalog.getProjectById(storedState?.activeProjectId)) ??
+      (await this.catalog.getRelevantProject(conversationText));
     const [candidateUnits, projectEntryUnit, knowledgeDocuments] = await Promise.all([
       this.catalog.findCandidateUnits(conversationText),
       this.catalog.findProjectEntryUnit(activeProject?.id),
       this.knowledge.getRelevantDocuments(conversationText)
     ]);
     const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit);
+    const conversationState = this.ai.deriveConversationState(normalizedMessageText, {
+      activeProject,
+      candidateUnits: decisionUnits,
+      projectEntryUnit,
+      knowledgeDocuments,
+      history,
+      conversationText,
+      conversationState: storedState
+    });
     const decision = await this.ai.decide(normalizedMessageText, {
       activeProject,
       candidateUnits: decisionUnits,
       projectEntryUnit,
       knowledgeDocuments,
       history,
-      conversationText
+      conversationText,
+      conversationState
     });
     const safeDecision = this.policy.enforce(decision, decisionUnits);
 
@@ -88,10 +100,11 @@ export class TelegramService {
       messageText.slice(0, 240),
       safeDecision.intent,
       safeDecision.lead_score,
-      {
+      this.mergeConversationMetadata(conversation.metadata, {
+        conversation_state: conversationState,
         missing_fields: safeDecision.missing_fields,
         policy_flags: safeDecision.policy_flags
-      }
+      })
     );
 
     const [lead, supportTicket] = await Promise.all([
@@ -212,6 +225,21 @@ export class TelegramService {
     };
 
     return exactMatches[normalized] ?? compact;
+  }
+
+  private mergeConversationMetadata(
+    metadata: Prisma.JsonValue | null | undefined,
+    patch: Record<string, unknown>
+  ) {
+    const base =
+      metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? (metadata as Record<string, unknown>)
+        : {};
+
+    return {
+      ...base,
+      ...patch
+    };
   }
 
 }

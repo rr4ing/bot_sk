@@ -1,11 +1,48 @@
 import { Injectable } from "@nestjs/common";
 import { MessageRole, Prisma } from "@prisma/client";
 import { PrismaService } from "./prisma.service";
-import { TelegramUpdate } from "./types";
+import { ConversationState, TelegramUpdate } from "./types";
 
 @Injectable()
 export class ConversationService {
   constructor(private readonly prisma: PrismaService) {}
+
+  readConversationState(metadata: Prisma.JsonValue | null | undefined): ConversationState | null {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return null;
+    }
+
+    const rawState = (metadata as Record<string, unknown>).conversation_state;
+
+    if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) {
+      return null;
+    }
+
+    const state = rawState as Record<string, unknown>;
+
+    return {
+      purpose:
+        state.purpose === "self" ||
+        state.purpose === "family" ||
+        state.purpose === "investment" ||
+        state.purpose === "parents"
+          ? state.purpose
+          : null,
+      budgetRub: typeof state.budgetRub === "number" ? state.budgetRub : null,
+      rooms: typeof state.rooms === "number" ? state.rooms : null,
+      timeline:
+        state.timeline === "urgent" ||
+        state.timeline === "soon" ||
+        state.timeline === "later"
+          ? state.timeline
+          : null,
+      hasPhone: Boolean(state.hasPhone),
+      activeProjectId: typeof state.activeProjectId === "string" ? state.activeProjectId : null,
+      activeProjectName: typeof state.activeProjectName === "string" ? state.activeProjectName : null,
+      lastUserMessage: typeof state.lastUserMessage === "string" ? state.lastUserMessage : null,
+      updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : null
+    };
+  }
 
   async ensureConversation(update: TelegramUpdate) {
     const message = update.message;

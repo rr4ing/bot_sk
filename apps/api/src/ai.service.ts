@@ -1,26 +1,27 @@
 import { Injectable, Logger } from "@nestjs/common";
+import type { AIDecision } from "@builderbot/domain";
+import {
+  aiDecisionSchema,
+  intentSchema,
+  missingFieldSchema,
+  policyFlagSchema
+} from "@builderbot/domain";
+import { zodTextFormat } from "openai/helpers/zod";
 import OpenAI from "openai";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { AIDecision } from "@builderbot/domain";
-import { aiDecisionSchema } from "@builderbot/domain";
-import { EnvService } from "./env";
-import { DecisionContext } from "./types";
+import { z } from "zod";
 import { CatalogService } from "./catalog.service";
+import { EnvService } from "./env";
+import {
+  ConversationState,
+  DecisionContext,
+  PurchasePurpose,
+  PurchaseTimeline
+} from "./types";
 
-type PurchasePurpose = "self" | "family" | "investment" | "parents" | null;
-type PurchaseTimeline = "urgent" | "soon" | "later" | null;
-
-interface SalesSignals {
-  budgetRub: number | null;
-  rooms: number | null;
-  purpose: PurchasePurpose;
-  timeline: PurchaseTimeline;
+interface TurnIntent {
   isGreeting: boolean;
-  isPurposeOnly: boolean;
-  isBudgetOnly: boolean;
-  isRoomsOnly: boolean;
-  isTimelineOnly: boolean;
   isShortReply: boolean;
   wantsManager: boolean;
   wantsProjectOverview: boolean;
@@ -43,44 +44,53 @@ const PROMPT_FILE_PATH = resolve(
   "docs/badaevsky-sales-system-prompt.md"
 );
 
+const structuredDecisionSchema = z.object({
+  intent: intentSchema.nullable(),
+  reply_text: z.string().min(1).max(4000).nullable(),
+  recommended_unit_ids: z.array(z.string()).max(3).nullable(),
+  lead_score: z.number().int().min(0).max(100).nullable(),
+  handoff_required: z.boolean().nullable(),
+  support_ticket_required: z.boolean().nullable(),
+  missing_fields: z.array(missingFieldSchema).nullable(),
+  policy_flags: z.array(policyFlagSchema).nullable()
+});
+
+const structuredDecisionLooseSchema = structuredDecisionSchema.partial();
+
+const aiDecisionTextFormat = zodTextFormat(structuredDecisionSchema, "ai_decision");
+
 function loadSystemPromptFromFile() {
   try {
-    const raw = readFileSync(PROMPT_FILE_PATH, "utf8");
-    const promptBlock = raw.match(/```md\s*([\s\S]*?)```/);
-
-    return promptBlock?.[1]?.trim() || raw;
+    return readFileSync(PROMPT_FILE_PATH, "utf8").trim();
   } catch {
     return [
-      "Ты сильный AI-консультант отдела продаж и поддержки застройщика.",
-      "Работай только на русском языке и отвечай спокойно, уверенно, по-человечески, без давления и без канцелярита.",
-      "Сначала отвечай по сути запроса, потом мягко квалифицируй клиента. Не задавай больше двух вопросов в одном сообщении.",
-      "Не выдумывай цены, наличие, сроки, юридические гарантии, акции и ипотечные условия вне контекста.",
-      "Если проект премиальный, продавай ценность через локацию, архитектуру, виды, приватность, редкость продукта и качество среды.",
-      "Верни только JSON по контракту AIDecision."
+      "Ты AI-ассистент отдела продаж застройщика.",
+      "Работай только на русском языке.",
+      "Не повторяй вопросы, если клиент уже дал ответ.",
+      "Сначала используй уже известный контекст, потом задавай максимум 1-2 полезных вопроса.",
+      "Не выдумывай цены, наличие, скидки, сроки и юридические обещания.",
+      "Возвращай только структурированный JSON."
     ].join("\n");
   }
 }
 
-const BASE_SYSTEM_PROMPT = loadSystemPromptFromFile();
-
-const RUNTIME_SYSTEM_PROMPT = [
-  "Ты AI-консультант отдела продаж застройщика. Работаешь только на русском.",
-  "Твоя задача: понять уже полученную от клиента информацию, не задавать повторные вопросы и двигать диалог к полезному следующему шагу.",
-  "Если клиент уже сообщил цель покупки, бюджет, формат или срок, признай это и используй в ответе.",
-  "Не повторяй один и тот же вопрос повторно, если ответ уже есть в history, signals или hints.",
-  "Отвечай коротко, по делу, без канцелярита и без давления. Обычно 2-5 предложений.",
-  "Не выдумывай цены, наличие, скидки, сроки и юридические обещания. Если точность не гарантирована, говори аккуратно.",
-  "Если данных уже достаточно для shortlist или сравнения, переходи к этому, а не продолжай qualification.",
-  "Если клиент пишет коротко, интерпретируй это как продолжение текущего шага диалога, а не как новый диалог.",
-  "ЖК Бадаевский: премиальный проект Capital Group на Кутузовском проспекте, архитектура Herzog & de Meuron, первая линия Москвы-реки, акцент на статус, архитектуру, виды, редкость продукта и качество среды.",
-  "Верни только JSON по контракту AIDecision."
+const SYSTEM_PROMPT = [
+  "Ты сильный AI-консультант отдела продаж крупной строительной компании.",
+  "Твоя задача: осмысленно продолжать текущий диалог, а не начинать его заново.",
+  "У тебя есть два блока данных: persistent_state и turn_intent.",
+  "persistent_state — это уже накопленный контекст клиента. Не спрашивай его повторно.",
+  "turn_intent — это смысл только текущего сообщения. Используй его как повод для следующего шага.",
+  "Если для shortlist уже достаточно данных, переходи к вариантам сразу.",
+  "Если клиент просит цены, подбор, лучший вход или сравнение, отвечай предметно, не уводи в лишнюю qualification.",
+  "Если клиент дал новую информацию, она важнее старой.",
+  "Отвечай коротко, спокойно, по-человечески, без шаблонного допроса.",
+  "Обычно 2-4 предложения. Не больше двух вопросов в одном ответе.",
+  "Если проект премиальный, продавай ценность через локацию, архитектуру, приватность, виды, статус и редкость продукта.",
+  "Если данных недостаточно, задавай только следующий полезный вопрос, а не весь опросник заново.",
+  "Если менеджер или поддержка действительно нужны, эскалируй.",
+  "",
+  loadSystemPromptFromFile()
 ].join("\n");
-
-const aiDecisionLooseSchema = aiDecisionSchema.partial().extend({
-  intent: aiDecisionSchema.shape.intent,
-  reply_text: aiDecisionSchema.shape.reply_text,
-  lead_score: aiDecisionSchema.shape.lead_score
-});
 
 @Injectable()
 export class AiService {
@@ -101,396 +111,448 @@ export class AiService {
       : null;
   }
 
+  deriveConversationState(messageText: string, context: DecisionContext): ConversationState {
+    const previous = context.conversationState ?? this.emptyConversationState();
+    const messages = this.getConversationUserMessages(messageText, context);
+    const normalizedConversation = this.buildConversationText(messageText, context).toLowerCase();
+
+    return {
+      purpose: this.extractLatestPurpose(messages) ?? previous.purpose,
+      budgetRub: this.extractLatestBudget(messages) ?? previous.budgetRub,
+      rooms: this.extractLatestRooms(messages) ?? previous.rooms,
+      timeline: this.extractLatestTimeline(messages) ?? previous.timeline,
+      hasPhone: previous.hasPhone || /контакт:\s*\+?\d|\+7\d{10}|\b8\d{10}\b/.test(normalizedConversation),
+      activeProjectId: context.activeProject?.id ?? previous.activeProjectId ?? null,
+      activeProjectName: context.activeProject?.name ?? previous.activeProjectName ?? null,
+      lastUserMessage: messageText.trim() || previous.lastUserMessage || null,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
   async decide(messageText: string, context: DecisionContext): Promise<AIDecision> {
+    const persistentState =
+      context.conversationState ?? this.deriveConversationState(messageText, context);
+    const turnIntent = this.collectTurnIntent(messageText);
+
     if (!this.client) {
-      return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
+      return this.normalizeDecision(
+        this.degradedDecision(messageText, context, persistentState, turnIntent),
+        context,
+        persistentState,
+        turnIntent
+      );
     }
 
-    const signals = this.collectSignals(messageText, context);
-    const systemPrompt = [
-      RUNTIME_SYSTEM_PROMPT,
-      context.activeProject
-        ? `Текущий проект в фокусе: ${context.activeProject.name}. Не уводи в другой ЖК без явного запроса клиента.`
-        : "Если клиент явно говорит о конкретном ЖК, держись его и не уводи разговор в другой проект.",
-      "Дополнительные runtime-правила:",
-      "- Если клиент уже дал цель покупки, не спрашивай ее повторно.",
-      "- Если клиент уже дал бюджет, не спрашивай его повторно.",
-      "- Если клиент уже дал формат квартиры, не спрашивай его повторно.",
-      "- Если клиент нажал кнопку или ответил коротко, продолжай текущий шаг диалога, а не начинай разговор заново.",
-      "- Если в текущем проекте есть входной лот и клиент спросил про лучший вход, объясни нижнюю планку проекта.",
-      "- Если бюджет клиента ниже входного билета проекта, скажи об этом честно и предложи два полезных сценария следующего шага.",
-      "- Если уже понятны ключевые данные и клиент просит сравнение или подбор, переходи к конкретике без лишних повторов.",
-      "- Если клиент поздоровался, обязательно поздоровайся в ответ."
-    ].join("\n");
-
-    const compactHistory = context.history.slice(-6).map((entry) => ({
-      role: entry.role,
-      content: this.truncate(entry.content, 220)
-    }));
-
-    const compactUnits = context.candidateUnits.slice(0, 3).map((unit) => ({
-      id: unit.id,
-      code: unit.code,
-      rooms: unit.rooms,
-      floor: unit.floor,
-      areaSqm: unit.areaSqm,
-      priceRub: unit.priceRub,
-      status: unit.status,
-      finishing: unit.finishing
-    }));
-
-    const compactKnowledge = context.knowledgeDocuments.slice(0, 2).map((doc) => ({
-      title: doc.title,
-      kind: doc.kind,
-      excerpt: this.truncate(doc.excerpt, 180),
-      body_preview: this.truncate(doc.body, 320),
-      tags: doc.tags.slice(0, 5)
-    }));
-
-    const input = {
-      messageText,
-      history: compactHistory,
-      signals,
-      project: context.activeProject
-        ? {
-            name: context.activeProject.name,
-            city: context.activeProject.city,
-            district: context.activeProject.district,
-            description: this.truncate(context.activeProject.description, 220),
-            salesHeadline: context.activeProject.salesHeadline
-          }
-        : null,
-      units: compactUnits,
-      knowledge: compactKnowledge,
-      hints: {
-        detectedBudgetRub: signals.budgetRub,
-        detectedRooms: signals.rooms,
-        purchasePurpose: signals.purpose,
-        purchaseTimeline: signals.timeline
-      }
-    };
-
     try {
-      const response = await this.client.responses.create({
-        model: this.env.languageModelName,
-        ...(this.env.languageModelProvider === "xai" ? { store: false } : {}),
-        input: [
-          {
-            role: "system",
-            content: systemPrompt
-          } as never,
-          {
-            role: "user",
-            content: JSON.stringify(input)
-          } as never
-        ]
-      });
-
-      const rawText = (response as { output_text?: string }).output_text ?? "";
-      const json = this.extractJson(rawText);
-      const decision = this.parseModelDecision(JSON.parse(json));
-      return this.normalizeDecision(messageText, context, decision, true);
+      const decision = await this.queryModel(messageText, context, persistentState, turnIntent);
+      return this.normalizeDecision(decision, context, persistentState, turnIntent);
     } catch (error) {
-      this.logger.error("OpenAI Responses API failed, switching to fallback mode", error as Error);
-      return this.normalizeDecision(messageText, context, this.fallbackDecision(messageText, context));
+      this.logger.error("OpenAI Responses API failed, switching to degraded mode", error as Error);
+      return this.normalizeDecision(
+        this.degradedDecision(messageText, context, persistentState, turnIntent),
+        context,
+        persistentState,
+        turnIntent
+      );
     }
   }
 
-  private fallbackDecision(messageText: string, context: DecisionContext): AIDecision {
-    const signals = this.collectSignals(messageText, context);
-    const recommended = context.candidateUnits.slice(0, 3);
-    const projectName = context.activeProject?.name ?? "проект";
-    const premium = this.isPremiumProject(context);
-    const premiumQualifier = premium
-      ? "Если важны статус, архитектура и качественная среда, это сильный вариант."
-      : "Могу быстро сузить поиск до самых подходящих вариантов.";
+  private buildModelInput(
+    messageText: string,
+    context: DecisionContext,
+    persistentState: ConversationState,
+    turnIntent: TurnIntent
+  ) {
+    return {
+      message_text: messageText,
+      persistent_state: persistentState,
+      turn_intent: turnIntent,
+      active_project: context.activeProject
+        ? {
+            id: context.activeProject.id,
+            name: context.activeProject.name,
+            city: context.activeProject.city,
+            district: context.activeProject.district,
+            description: this.truncate(context.activeProject.description, 260),
+            sales_headline: context.activeProject.salesHeadline
+          }
+        : null,
+      project_entry_unit: context.projectEntryUnit
+        ? {
+            id: context.projectEntryUnit.id,
+            code: context.projectEntryUnit.code,
+            rooms: context.projectEntryUnit.rooms,
+            floor: context.projectEntryUnit.floor,
+            area_sqm: context.projectEntryUnit.areaSqm,
+            price_rub: context.projectEntryUnit.priceRub
+          }
+        : null,
+      candidate_units: context.candidateUnits.slice(0, 3).map((unit) => ({
+        id: unit.id,
+        code: unit.code,
+        rooms: unit.rooms,
+        floor: unit.floor,
+        area_sqm: unit.areaSqm,
+        price_rub: unit.priceRub,
+        finishing: unit.finishing
+      })),
+      knowledge: context.knowledgeDocuments.slice(0, 2).map((document) => ({
+        title: document.title,
+        kind: document.kind,
+        excerpt: this.truncate(document.excerpt, 180),
+        body_preview: this.truncate(document.body, 280)
+      })),
+      recent_history: context.history.slice(-6).map((entry) => ({
+        role: entry.role,
+        content: this.truncate(entry.content, 220)
+      }))
+    };
+  }
 
-    if (signals.hasNegative) {
-      return {
+  private hydrateDecision(
+    decision: z.infer<typeof structuredDecisionLooseSchema>,
+    persistentState: ConversationState,
+    turnIntent: TurnIntent
+  ): AIDecision {
+    const defaultMissingFields = this.buildMissingFields(persistentState, {
+      includePhoneForHotLead: turnIntent.wantsManager || turnIntent.wantsCallback
+    });
+
+    const fallbackIntent =
+      defaultMissingFields.length > 0 ? "clarify_needs" : "sales_qualification";
+
+    return aiDecisionSchema.parse({
+      intent: decision.intent ?? fallbackIntent,
+      reply_text:
+        decision.reply_text ??
+        "Понял контекст. Продолжу от уже известных данных и не буду гонять вас по кругу вопросами.",
+      recommended_unit_ids: decision.recommended_unit_ids ?? [],
+      lead_score: decision.lead_score ?? this.calculateLeadScore(persistentState, turnIntent, 0),
+      handoff_required: decision.handoff_required ?? false,
+      support_ticket_required: decision.support_ticket_required ?? false,
+      missing_fields: decision.missing_fields ?? defaultMissingFields,
+      policy_flags: decision.policy_flags ?? []
+    });
+  }
+
+  private async queryModel(
+    messageText: string,
+    context: DecisionContext,
+    persistentState: ConversationState,
+    turnIntent: TurnIntent
+  ) {
+    const request = {
+      model: this.env.languageModelName,
+      ...(this.env.languageModelProvider === "xai" ? { store: false } : {}),
+      text: {
+        format: aiDecisionTextFormat
+      },
+      input: [
+        {
+          role: "system" as const,
+          content: SYSTEM_PROMPT
+        },
+        {
+          role: "user" as const,
+          content: JSON.stringify(this.buildModelInput(messageText, context, persistentState, turnIntent))
+        }
+      ]
+    };
+
+    const responsesClient = this.client?.responses as
+      | {
+          parse?: (payload: unknown) => Promise<{ output_parsed?: z.infer<typeof structuredDecisionSchema> | null }>;
+          create?: (payload: unknown) => Promise<{ output_text?: string }>;
+        }
+      | undefined;
+
+    if (responsesClient?.parse) {
+      const response = await responsesClient.parse(request);
+
+      if (!response.output_parsed) {
+        throw new Error("Model did not return structured output");
+      }
+
+      return this.hydrateDecision(response.output_parsed, persistentState, turnIntent);
+    }
+
+    if (responsesClient?.create) {
+      const response = await responsesClient.create(request);
+      const rawText = response.output_text?.trim();
+
+      if (!rawText) {
+        throw new Error("Model did not return structured text output");
+      }
+
+      return this.hydrateDecision(
+        structuredDecisionLooseSchema.parse(JSON.parse(rawText)),
+        persistentState,
+        turnIntent
+      );
+    }
+
+    throw new Error("Language model client does not support parse or create");
+  }
+
+  private degradedDecision(
+    messageText: string,
+    context: DecisionContext,
+    persistentState: ConversationState,
+    turnIntent: TurnIntent
+  ): AIDecision {
+    const projectName = context.activeProject?.name ?? "проект";
+    const missingFields = this.buildMissingFields(persistentState, {
+      includePhoneForHotLead: turnIntent.wantsManager || turnIntent.wantsCallback
+    });
+    const shortlistReady = this.isShortlistReady(persistentState, context);
+    const recommendedIds = context.candidateUnits.slice(0, 3).map((unit) => unit.id);
+
+    if (turnIntent.hasNegative) {
+      return aiDecisionSchema.parse({
         intent: "handoff_manager",
         reply_text:
-          "Понимаю, что ситуация неприятная. Подключу менеджера, чтобы разобраться без лишней переписки и помочь быстрее.",
+          "Понимаю, что ситуация неприятная. Подключу менеджера, чтобы быстро разобраться и не гонять вас по кругу.",
         recommended_unit_ids: [],
         lead_score: 86,
         handoff_required: true,
         support_ticket_required: true,
-        missing_fields: signals.hasPhone ? [] : ["phone"],
+        missing_fields: persistentState.hasPhone ? [] : ["phone"],
         policy_flags: ["negative_sentiment", "human_handoff_required"]
-      };
+      });
     }
 
-    if (signals.hasSupportIntent || signals.hasMortgageIntent) {
-      return {
+    if (turnIntent.hasSupportIntent || turnIntent.hasMortgageIntent) {
+      return aiDecisionSchema.parse({
         intent: "support_answer",
         reply_text:
-          "Помогу сориентироваться по процессу, документам и следующим шагам. Если нужен статус по вашей конкретной сделке или проверка условий, сразу подключу менеджера.",
+          "Помогу сориентироваться по процессу, документам и следующим шагам. Если нужен разбор вашей конкретной сделки или статуса, сразу подключу менеджера.",
         recommended_unit_ids: [],
-        lead_score: signals.hasMortgageIntent ? 52 : 44,
+        lead_score: turnIntent.hasMortgageIntent ? 54 : 44,
         handoff_required: false,
-        support_ticket_required: /статус|провер|действующ|моей сделк/i.test(
-          this.buildConversationText(messageText, context)
-        ),
+        support_ticket_required: false,
         missing_fields: [],
         policy_flags: []
-      };
+      });
     }
 
-    if (signals.wantsManager || signals.wantsCallback) {
-      if (!signals.hasPhone) {
-        return {
+    if (turnIntent.wantsManager || turnIntent.wantsCallback) {
+      if (!persistentState.hasPhone) {
+        return aiDecisionSchema.parse({
           intent: "clarify_needs",
           reply_text:
-            "Подключу менеджера. Отправьте, пожалуйста, удобный номер телефона или контакт в Telegram, и я передам запрос с вашим контекстом без потери деталей.",
-          recommended_unit_ids: recommended.map((unit) => unit.id),
-          lead_score: this.calculateLeadScore(signals, recommended.length),
+            "Подключу менеджера. Отправьте, пожалуйста, удобный номер телефона или контакт, и я передам уже собранный контекст без потери деталей.",
+          recommended_unit_ids: [],
+          lead_score: 76,
           handoff_required: false,
           support_ticket_required: false,
           missing_fields: ["phone"],
           policy_flags: []
-        };
+        });
       }
 
-      return {
+      return aiDecisionSchema.parse({
         intent: "handoff_manager",
         reply_text:
-          "Отлично, передаю ваш запрос менеджеру. Он уже получит контекст по бюджету, формату и проекту, чтобы разговор был предметным, а не с нуля.",
-        recommended_unit_ids: recommended.map((unit) => unit.id),
-        lead_score: Math.max(this.calculateLeadScore(signals, recommended.length), 82),
+          "Отлично, передаю ваш запрос менеджеру уже с контекстом по сценарию покупки, бюджету и формату.",
+        recommended_unit_ids: recommendedIds,
+        lead_score: 84,
         handoff_required: true,
         support_ticket_required: false,
         missing_fields: [],
         policy_flags: ["human_handoff_required"]
-      };
-    }
-
-    if (signals.hasDiscountObjection) {
-      const missingFields = this.buildMissingFields(signals, {
-        includePhoneForHotLead: true
       });
-
-      return {
-        intent: "sales_qualification",
-        reply_text:
-          "Понимаю запрос на более сильные условия. Я не обещаю персональную скидку заранее, но могу сузить подбор до самых сильных лотов и отдельно проверить у менеджера, есть ли сейчас акции или гибкость по конкретному варианту.",
-        recommended_unit_ids: recommended.map((unit) => unit.id).slice(0, 2),
-        lead_score: Math.max(this.calculateLeadScore(signals, recommended.length), 70),
-        handoff_required: signals.hasPhone,
-        support_ticket_required: false,
-        missing_fields: missingFields,
-        policy_flags: signals.hasPhone ? ["discount_out_of_policy"] : []
-      };
     }
 
-    if (signals.wantsComparison && recommended.length >= 2) {
-      return {
+    if (turnIntent.wantsBestEntry && context.projectEntryUnit) {
+      return aiDecisionSchema.parse({
         intent: "unit_recommendation",
-        reply_text:
-          "Сравню не в лоб по цифрам, а по смыслу покупки: покажу, где сильнее входной билет, где лучше ликвидность, а где выше ценность для жизни. Ниже оставлю 2-3 варианта, от которых уже есть смысл отталкиваться.",
-        recommended_unit_ids: recommended.map((unit) => unit.id).slice(0, 3),
-        lead_score: Math.max(this.calculateLeadScore(signals, recommended.length), 68),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: this.buildMissingFields(signals),
-        policy_flags: []
-      };
-    }
-
-    if (signals.wantsBestEntry && context.projectEntryUnit) {
-      const entryUnit = context.projectEntryUnit;
-
-      return {
-        intent: "unit_recommendation",
-        reply_text: `Если смотреть на самый доступный вход${context.activeProject ? ` в ${projectName}` : ""}, то сейчас ориентир начинается примерно от ${this.formatRub(entryUnit.priceRub)} за ${entryUnit.areaSqm} м². Это хороший способ быстро понять нижнюю планку проекта. Если хотите, следующим сообщением покажу, стоит ли брать именно входной лот или лучше доплатить за более сильный формат.`,
-        recommended_unit_ids: [entryUnit.id],
-        lead_score: Math.max(this.calculateLeadScore(signals, 1), 60),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: this.buildMissingFields(signals),
-        policy_flags: ["price_unverified"]
-      };
-    }
-
-    if (
-      context.activeProject &&
-      context.projectEntryUnit &&
-      signals.budgetRub &&
-      signals.budgetRub < context.projectEntryUnit.priceRub
-    ) {
-      return {
-        intent: "clarify_needs",
-        reply_text: `Скажу честно: в ${projectName} текущий публичный вход сейчас начинается примерно от ${this.formatRub(
+        reply_text: `Если смотреть на минимальный вход в ${projectName}, текущий ориентир начинается примерно от ${this.formatRub(
           context.projectEntryUnit.priceRub
-        )}, поэтому при бюджете до ${this.formatRub(
-          signals.budgetRub
-        )} прямого попадания в текущую экспозицию не вижу. Могу сделать два полезных шага: показать самый близкий по входу формат или предложить альтернативный сценарий покупки без потери логики сделки.`,
-        recommended_unit_ids: [],
-        lead_score: Math.max(this.calculateLeadScore(signals, 0), 58),
+        )} за ${context.projectEntryUnit.areaSqm} м². Если хотите, дальше покажу, стоит ли брать именно входной лот или лучше немного доплатить за более сильный вариант.`,
+        recommended_unit_ids: [context.projectEntryUnit.id],
+        lead_score: this.calculateLeadScore(persistentState, turnIntent, 1),
         handoff_required: false,
         support_ticket_required: false,
-        missing_fields: this.buildMissingFields(signals),
+        missing_fields: missingFields,
         policy_flags: ["price_unverified"]
-      };
-    }
-
-    if (signals.hasPriceObjection || signals.hasHesitation) {
-      return {
-        intent: "sales_qualification",
-        reply_text:
-          "Понимаю это ощущение. Чтобы не принимать решение вслепую, могу коротко сравнить 2-3 самых подходящих варианта и показать, где вы платите за локацию, вид, метраж или статус проекта, а где можно оптимизировать бюджет без потери смысла покупки.",
-        recommended_unit_ids: recommended.map((unit) => unit.id),
-        lead_score: Math.max(this.calculateLeadScore(signals, recommended.length), 58),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: this.buildMissingFields(signals),
-        policy_flags: []
-      };
-    }
-
-    if (signals.wantsProjectOverview && context.activeProject) {
-      return {
-        intent: "sales_qualification",
-        reply_text: `${projectName} — ${context.activeProject.salesHeadline} ${premiumQualifier} Если хотите, сразу покажу, какие форматы и бюджеты сейчас ближе именно к вашему сценарию покупки.`,
-        recommended_unit_ids: recommended.map((unit) => unit.id),
-        lead_score: Math.max(this.calculateLeadScore(signals, recommended.length), 56),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: this.buildMissingFields(signals),
-        policy_flags: []
-      };
-    }
-
-    if (signals.wantsPriceAnswer && context.activeProject && recommended.length > 0) {
-      const entryPrice = Math.min(...recommended.map((unit) => unit.priceRub));
-
-      return {
-        intent: "sales_qualification",
-        reply_text: `Если смотреть на текущую публичную экспозицию${context.activeProject ? ` в ${projectName}` : ""}, ориентир входа сейчас начинается примерно от ${this.formatRub(entryPrice)}. Точную цену и наличие лучше подтверждать на момент обращения, потому что экспозиция меняется. Если хотите, сразу покажу, какие форматы сейчас дают лучший вход по бюджету и сценарию покупки.`,
-        recommended_unit_ids: recommended.map((unit) => unit.id),
-        lead_score: Math.max(this.calculateLeadScore(signals, recommended.length), 54),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: this.buildMissingFields(signals),
-        policy_flags: ["price_unverified"]
-      };
-    }
-
-    if (recommended.length > 0 && (signals.budgetRub || signals.rooms !== null || signals.wantsSelection)) {
-      const fitText = this.describeFit(signals);
-      const missingFields = this.buildMissingFields(signals, {
-        includePhoneForHotLead:
-          signals.timeline === "urgent" || signals.wantsCallback || this.calculateLeadScore(signals, recommended.length) >= 80
       });
+    }
 
-      return {
+    if (shortlistReady && context.candidateUnits.length > 0) {
+      return aiDecisionSchema.parse({
         intent: "unit_recommendation",
-        reply_text: `Подобрал несколько квартир${context.activeProject ? ` в ${projectName}` : ""}${fitText}. Сразу покажу самые релевантные варианты из текущего каталога. Если хотите, следующим сообщением сузим shortlist до 1-2 лотов под ваш сценарий и подготовим звонок или просмотр.`,
-        recommended_unit_ids: recommended.map((unit) => unit.id),
-        lead_score: this.calculateLeadScore(signals, recommended.length),
-        handoff_required: signals.timeline === "urgent" && signals.hasPhone,
+        reply_text: `${this.buildKnownFactsSummary(
+          persistentState,
+          context
+        )} Данных уже достаточно, поэтому сразу покажу самые релевантные варианты и коротко объясню, почему именно они подходят.`,
+        recommended_unit_ids: recommendedIds,
+        lead_score: this.calculateLeadScore(persistentState, turnIntent, recommendedIds.length),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: [],
+        policy_flags: []
+      });
+    }
+
+    if (turnIntent.wantsPriceAnswer && (context.projectEntryUnit || context.candidateUnits.length > 0)) {
+      const anchorUnit = context.projectEntryUnit ?? context.candidateUnits[0];
+
+      return aiDecisionSchema.parse({
+        intent: "clarify_needs",
+        reply_text: `Если смотреть на текущую публичную экспозицию в ${projectName}, ориентир входа сейчас начинается примерно от ${this.formatRub(
+          anchorUnit.priceRub
+        )}. ${this.buildGuidedQuestion(missingFields, context)}`,
+        recommended_unit_ids: anchorUnit ? [anchorUnit.id] : [],
+        lead_score: this.calculateLeadScore(persistentState, turnIntent, anchorUnit ? 1 : 0),
+        handoff_required: false,
+        support_ticket_required: false,
+        missing_fields: missingFields,
+        policy_flags: ["price_unverified"]
+      });
+    }
+
+    if (turnIntent.isGreeting) {
+      return aiDecisionSchema.parse({
+        intent: "sales_qualification",
+        reply_text: `Здравствуйте! Помогу с подбором квартиры в ${projectName}. Для начала подскажите, для чего покупаете: для себя, семьи, инвестиций или родителей?`,
+        recommended_unit_ids: [],
+        lead_score: 28,
+        handoff_required: false,
         support_ticket_required: false,
         missing_fields: missingFields,
         policy_flags: []
-      };
+      });
     }
-
-    if (signals.rooms !== null || signals.budgetRub || signals.purpose || signals.timeline) {
-      return {
-        intent: "clarify_needs",
-        reply_text:
-          "Контекст уже понятнее. Чтобы подобрать действительно сильные варианты, уточню один шаг: что сейчас важнее всего — уложиться в бюджет, взять лучший вид/планировку или быстрее выйти на сделку?",
-        recommended_unit_ids: [],
-        lead_score: this.calculateLeadScore(signals, 0),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: this.buildMissingFields(signals),
-        policy_flags: []
-      };
-    }
-
-    return {
-      intent: "sales_qualification",
-      reply_text:
-        "Помогу подобрать квартиру без лишнего давления. Чтобы сразу уйти в точные варианты, подскажите, для чего покупаете — для себя, семьи или инвестиции, какой бюджет комфортен и в какие сроки планируете решение?",
-      recommended_unit_ids: [],
-      lead_score: 36,
-      handoff_required: false,
-      support_ticket_required: false,
-      missing_fields: ["purpose", "budget", "rooms", "timeline"],
-      policy_flags: []
-    };
-  }
-
-  private extractJson(rawText: string) {
-    const start = rawText.indexOf("{");
-    const end = rawText.lastIndexOf("}");
-
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("Model did not return JSON");
-    }
-
-    return rawText.slice(start, end + 1);
-  }
-
-  private parseModelDecision(payload: unknown): AIDecision {
-    const looseDecision = aiDecisionLooseSchema.parse(payload);
 
     return aiDecisionSchema.parse({
-      recommended_unit_ids: [],
+      intent: missingFields.length > 0 ? "clarify_needs" : "sales_qualification",
+      reply_text:
+        missingFields.length > 0
+          ? `${this.buildKnownFactsSummary(persistentState, context)} ${this.buildGuidedQuestion(
+              missingFields,
+              context
+            )}`
+          : `${this.buildKnownFactsSummary(
+              persistentState,
+              context
+            )} Если хотите, сразу покажу shortlist или сравню 2-3 самых сильных варианта.`,
+      recommended_unit_ids: shortlistReady ? recommendedIds : [],
+      lead_score: this.calculateLeadScore(persistentState, turnIntent, shortlistReady ? recommendedIds.length : 0),
       handoff_required: false,
       support_ticket_required: false,
-      missing_fields: [],
-      policy_flags: [],
-      ...looseDecision
+      missing_fields: shortlistReady ? [] : missingFields,
+      policy_flags: []
     });
   }
 
-  private collectSignals(messageText: string, context: DecisionContext): SalesSignals {
-    const conversationMessages = this.getConversationUserMessages(messageText, context);
-    const transcript = conversationMessages.join("\n");
-    const normalized = transcript.toLowerCase();
-    const currentNormalized = messageText.toLowerCase().trim();
-    const budgetRub = this.extractLatestBudget(conversationMessages);
-    const rooms = this.extractLatestRooms(conversationMessages);
-    const purpose = this.extractLatestPurpose(conversationMessages);
-    const timeline = this.extractLatestTimeline(conversationMessages);
-    const isGreeting = this.isGreetingMessage(currentNormalized);
-    const isShortReply = currentNormalized.length <= 24 && !/\d{6,}/.test(currentNormalized);
-    const isPurposeOnly =
-      this.extractPurpose(currentNormalized) !== null &&
-      this.catalog.extractBudget(currentNormalized) === null &&
-      this.catalog.extractRooms(currentNormalized) === null &&
-      this.extractTimeline(currentNormalized) === null;
-    const isBudgetOnly =
-      this.catalog.extractBudget(currentNormalized) !== null &&
-      this.catalog.extractRooms(currentNormalized) === null &&
-      this.extractPurpose(currentNormalized) === null;
-    const isRoomsOnly =
-      this.catalog.extractRooms(currentNormalized) !== null &&
-      this.catalog.extractBudget(currentNormalized) === null &&
-      this.extractPurpose(currentNormalized) === null;
+  private normalizeDecision(
+    decision: AIDecision,
+    context: DecisionContext,
+    persistentState: ConversationState,
+    turnIntent: TurnIntent
+  ): AIDecision {
+    const missingFields = this.reconcileMissingFields(
+      decision.missing_fields,
+      persistentState,
+      turnIntent
+    );
+    const shortlistReady = this.isShortlistReady(persistentState, context);
+    const safeRecommendedIds = decision.recommended_unit_ids
+      .filter((id) => context.candidateUnits.some((unit) => unit.id === id))
+      .slice(0, 3);
+    const recommendedUnitIds =
+      shortlistReady && safeRecommendedIds.length === 0
+        ? context.candidateUnits.slice(0, 3).map((unit) => unit.id)
+        : safeRecommendedIds;
+    const knownFactsSummary = this.buildKnownFactsSummary(persistentState, context);
+    const guidedQuestion = this.buildGuidedQuestion(missingFields, context);
+    const lastAssistantMessage = context.history
+      .filter((entry) => entry.role === "assistant")
+      .at(-1)?.content;
+
+    let normalized: AIDecision = aiDecisionSchema.parse({
+      ...decision,
+      recommended_unit_ids: recommendedUnitIds,
+      missing_fields: shortlistReady ? [] : missingFields,
+      lead_score: Math.max(
+        decision.lead_score,
+        this.calculateLeadScore(persistentState, turnIntent, recommendedUnitIds.length)
+      )
+    });
+
+    if (
+      turnIntent.wantsBestEntry &&
+      context.projectEntryUnit &&
+      normalized.intent !== "handoff_manager" &&
+      normalized.intent !== "support_answer" &&
+      normalized.intent !== "support_ticket"
+    ) {
+      normalized = aiDecisionSchema.parse({
+        ...normalized,
+        intent: "unit_recommendation",
+        recommended_unit_ids: [context.projectEntryUnit.id],
+        policy_flags: Array.from(new Set([...normalized.policy_flags, "price_unverified"]))
+      });
+    }
+
+    if (
+      shortlistReady &&
+      context.candidateUnits.length > 0 &&
+      normalized.intent !== "handoff_manager" &&
+      normalized.intent !== "support_answer" &&
+      normalized.intent !== "support_ticket" &&
+      this.isReaskingKnownInfo(normalized.reply_text, persistentState)
+    ) {
+      normalized = aiDecisionSchema.parse({
+        ...normalized,
+        intent: "unit_recommendation",
+        reply_text: `${knownFactsSummary} Данных уже достаточно, поэтому сразу покажу самые релевантные варианты и коротко поясню, почему они подходят именно под ваш сценарий.`,
+        recommended_unit_ids:
+          normalized.recommended_unit_ids.length > 0
+            ? normalized.recommended_unit_ids
+            : context.candidateUnits.slice(0, 3).map((unit) => unit.id),
+        missing_fields: []
+      });
+    } else if (
+      missingFields.length > 0 &&
+      normalized.intent !== "handoff_manager" &&
+      normalized.intent !== "support_answer" &&
+      normalized.intent !== "support_ticket" &&
+      (this.isReaskingKnownInfo(normalized.reply_text, persistentState) ||
+        (lastAssistantMessage &&
+          this.normalizeForComparison(lastAssistantMessage) ===
+            this.normalizeForComparison(normalized.reply_text)))
+    ) {
+      normalized = aiDecisionSchema.parse({
+        ...normalized,
+        intent: "clarify_needs",
+        reply_text: `${knownFactsSummary} ${guidedQuestion}`,
+        recommended_unit_ids: []
+      });
+    }
+
+    if (turnIntent.isShortReply && normalized.reply_text.length > 320) {
+      normalized = aiDecisionSchema.parse({
+        ...normalized,
+        reply_text: this.shortenReply(normalized.reply_text)
+      });
+    }
+
+    return normalized;
+  }
+
+  private collectTurnIntent(messageText: string): TurnIntent {
+    const normalized = messageText.toLowerCase().trim();
 
     return {
-      budgetRub,
-      rooms,
-      purpose,
-      timeline,
-      isGreeting,
-      isPurposeOnly,
-      isBudgetOnly,
-      isRoomsOnly,
-      isTimelineOnly:
-        this.extractTimeline(currentNormalized) !== null &&
-        this.catalog.extractBudget(currentNormalized) === null &&
-        this.catalog.extractRooms(currentNormalized) === null &&
-        this.extractPurpose(currentNormalized) === null,
-      isShortReply,
+      isGreeting: this.isGreetingMessage(normalized),
+      isShortReply: normalized.length <= 28 && !/\d{6,}/.test(normalized),
       wantsManager: this.containsAny(normalized, [
         "менеджер",
         "свяжите",
         "соедините",
-        "передайте",
-        "хочу поговорить",
-        "живой человек"
+        "живой человек",
+        "человек"
       ]),
       wantsProjectOverview: this.containsAny(normalized, [
         "расскажи",
@@ -498,9 +560,7 @@ export class AiService {
         "что за",
         "про жк",
         "про проект",
-        "о проекте",
-        "о жк",
-        "кратко про"
+        "о проекте"
       ]),
       wantsPriceAnswer: this.containsAny(normalized, [
         "сколько стоит",
@@ -513,19 +573,15 @@ export class AiService {
         "подбери",
         "подберите",
         "подобрать",
-        "подборка",
         "варианты",
         "покажи варианты",
+        "предложи",
         "shortlist"
       ]),
-      wantsComparison: this.containsAny(normalized, [
-        "сравни",
-        "сравнить",
-        "сравнение"
-      ]),
+      wantsComparison: this.containsAny(normalized, ["сравни", "сравнить", "сравнение"]),
       wantsBestEntry: this.containsAny(normalized, [
-        "выгодный вход",
         "минимальную цену входа",
+        "выгодный вход",
         "самый выгодный вход",
         "входной билет",
         "минимальный вход"
@@ -535,12 +591,11 @@ export class AiService {
         "позвон",
         "созвон",
         "звонок",
-        "наберите",
-        "просмотр",
-        "встреч"
+        "встреч",
+        "просмотр"
       ]),
       hasPhone: /контакт:\s*\+?\d|\+7\d{10}|\b8\d{10}\b/.test(normalized),
-      hasNegative: this.containsAny(normalized, ["жалоба", "претенз", "ужас", "плохо", "суд", "бесит"]),
+      hasNegative: this.containsAny(normalized, ["жалоба", "претенз", "ужас", "плохо", "бесит"]),
       hasSupportIntent: this.containsAny(normalized, [
         "документ",
         "договор",
@@ -562,19 +617,29 @@ export class AiService {
         "сомневаюсь",
         "не уверен",
         "боюсь",
-        "ошиб",
-        "пока отложу"
+        "отложу"
       ])
     };
   }
 
+  private emptyConversationState(): ConversationState {
+    return {
+      purpose: null,
+      budgetRub: null,
+      rooms: null,
+      timeline: null,
+      hasPhone: false,
+      activeProjectId: null,
+      activeProjectName: null,
+      lastUserMessage: null,
+      updatedAt: null
+    };
+  }
+
   private buildConversationText(messageText: string, context: DecisionContext) {
-    return [
-      ...context.history
-        .filter((entry) => entry.role === "user")
-        .map((entry) => entry.content),
-      messageText
-    ].join("\n");
+    return [...context.history.filter((entry) => entry.role === "user").map((entry) => entry.content), messageText]
+      .filter(Boolean)
+      .join("\n");
   }
 
   private getConversationUserMessages(messageText: string, context: DecisionContext) {
@@ -582,10 +647,10 @@ export class AiService {
       .filter((entry) => entry.role === "user")
       .map((entry) => entry.content.trim())
       .filter(Boolean);
-    const lastKnownMessage = messages.at(-1)?.toLowerCase();
+    const current = messageText.trim();
 
-    if (messageText.trim() && lastKnownMessage !== messageText.trim().toLowerCase()) {
-      messages.push(messageText.trim());
+    if (current && messages.at(-1)?.toLowerCase() !== current.toLowerCase()) {
+      messages.push(current);
     }
 
     return messages;
@@ -635,179 +700,6 @@ export class AiService {
     return null;
   }
 
-  private normalizeDecision(
-    messageText: string,
-    context: DecisionContext,
-    decision: AIDecision,
-    fromModel = false
-  ): AIDecision {
-    const signals = this.collectSignals(messageText, context);
-    const canRecommendUnits = this.canRecommendUnits(signals);
-    const missingFields = this.reconcileMissingFields(
-      decision.missing_fields,
-      signals
-    );
-    const guidedQuestion = this.buildGuidedQuestion(missingFields, context);
-    const knownFactsSummary = this.buildKnownFactsSummary(signals, context);
-    const lastAssistantMessage = context.history
-      .filter((entry) => entry.role === "assistant")
-      .at(-1)?.content;
-    const shortlistReady = this.isShortlistReady(signals, context);
-    const reasksKnownInfo = this.isReaskingKnownInfo(decision.reply_text, signals);
-
-    if (!fromModel && signals.isGreeting && !signals.wantsProjectOverview) {
-      return aiDecisionSchema.parse({
-        intent: "sales_qualification",
-        reply_text:
-          "Здравствуйте! Помогу подобрать квартиру и коротко сориентировать по Бадаевскому. Для начала подскажите, для чего покупаете: для себя, семьи или инвестиций?",
-        recommended_unit_ids: [],
-        lead_score: 28,
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: ["purpose", "budget", "rooms", "timeline"],
-        policy_flags: []
-      });
-    }
-
-    if (!fromModel && signals.isPurposeOnly) {
-      return aiDecisionSchema.parse({
-        intent: "sales_qualification",
-        reply_text: `Понял, рассматриваете покупку ${this.describePurposeForReply(
-          signals.purpose
-        )}. ${guidedQuestion}`,
-        recommended_unit_ids: [],
-        lead_score: Math.max(decision.lead_score, 42),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: missingFields,
-        policy_flags: []
-      });
-    }
-
-    if (!fromModel && signals.isBudgetOnly) {
-      return aiDecisionSchema.parse({
-        intent: "clarify_needs",
-        reply_text: `Отлично, бюджет понял. ${guidedQuestion}`,
-        recommended_unit_ids: [],
-        lead_score: Math.max(decision.lead_score, 46),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: missingFields,
-        policy_flags: []
-      });
-    }
-
-    if (!fromModel && signals.isRoomsOnly) {
-      return aiDecisionSchema.parse({
-        intent: "clarify_needs",
-        reply_text: `Формат понял. ${guidedQuestion}`,
-        recommended_unit_ids: [],
-        lead_score: Math.max(decision.lead_score, 46),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: missingFields,
-        policy_flags: []
-      });
-    }
-
-    if (!fromModel && signals.isTimelineOnly && !signals.wantsCallback && !signals.wantsManager) {
-      return aiDecisionSchema.parse({
-        intent: "clarify_needs",
-        reply_text: `По сроку понял. ${guidedQuestion}`,
-        recommended_unit_ids: [],
-        lead_score: Math.max(decision.lead_score, 46),
-        handoff_required: false,
-        support_ticket_required: false,
-        missing_fields: missingFields,
-        policy_flags: []
-      });
-    }
-
-    if (
-      shortlistReady &&
-      context.candidateUnits.length > 0 &&
-      !signals.wantsManager &&
-      !signals.wantsCallback &&
-      decision.intent !== "handoff_manager" &&
-      decision.intent !== "support_answer" &&
-      decision.intent !== "support_ticket"
-    ) {
-      return aiDecisionSchema.parse({
-        ...decision,
-        intent: "unit_recommendation",
-        reply_text: `${knownFactsSummary} Данных уже достаточно, поэтому не буду гонять вас по кругу вопросами. Сразу покажу самые релевантные варианты и коротко поясню, почему именно они сейчас ближе к вашему сценарию.`,
-        recommended_unit_ids:
-          decision.recommended_unit_ids.length > 0
-            ? decision.recommended_unit_ids
-            : context.candidateUnits.slice(0, 3).map((unit) => unit.id),
-        missing_fields: [],
-        policy_flags: decision.policy_flags
-      });
-    }
-
-    if (
-      reasksKnownInfo &&
-      missingFields.length > 0 &&
-      decision.intent !== "handoff_manager" &&
-      decision.intent !== "support_answer" &&
-      decision.intent !== "support_ticket"
-    ) {
-      return aiDecisionSchema.parse({
-        ...decision,
-        intent: "clarify_needs",
-        reply_text: `${knownFactsSummary} ${guidedQuestion}`,
-        recommended_unit_ids: canRecommendUnits ? decision.recommended_unit_ids : [],
-        missing_fields: missingFields
-      });
-    }
-
-    if (
-      !canRecommendUnits &&
-      decision.recommended_unit_ids.length > 0 &&
-      !signals.wantsCallback &&
-      !signals.wantsManager &&
-      decision.intent !== "clarify_needs" &&
-      decision.intent !== "handoff_manager"
-    ) {
-      return aiDecisionSchema.parse({
-        ...decision,
-        intent: "sales_qualification",
-        reply_text: guidedQuestion,
-        recommended_unit_ids: [],
-        missing_fields: missingFields
-      });
-    }
-
-    if (
-      lastAssistantMessage &&
-      this.normalizeForComparison(lastAssistantMessage) ===
-        this.normalizeForComparison(decision.reply_text) &&
-      missingFields.length > 0
-    ) {
-      return aiDecisionSchema.parse({
-        ...decision,
-        intent: "clarify_needs",
-        reply_text: guidedQuestion,
-        recommended_unit_ids: canRecommendUnits ? decision.recommended_unit_ids : [],
-        missing_fields: missingFields
-      });
-    }
-
-    if (
-      signals.isShortReply &&
-      !signals.wantsSelection &&
-      !signals.wantsPriceAnswer &&
-      decision.reply_text.length > 320
-    ) {
-      return aiDecisionSchema.parse({
-        ...decision,
-        reply_text: this.shortenReply(decision.reply_text)
-      });
-    }
-
-    return decision;
-  }
-
   private extractPurpose(normalizedText: string): PurchasePurpose {
     if (this.containsAny(normalizedText, ["инвест", "сдач", "ликвидн"])) {
       return "investment";
@@ -842,7 +734,15 @@ export class AiService {
       return "urgent";
     }
 
-    if (this.containsAny(normalizedText, ["1-3 месяца", "три месяца", "в ближайшие месяцы", "скоро"])) {
+    if (
+      this.containsAny(normalizedText, [
+        "1-3 месяца",
+        "1 3 месяца",
+        "в ближайшие месяцы",
+        "скоро",
+        "ближайший месяц"
+      ])
+    ) {
       return "soon";
     }
 
@@ -853,192 +753,50 @@ export class AiService {
     return null;
   }
 
-  private containsAny(normalizedText: string, tokens: string[]) {
-    return tokens.some((token) => normalizedText.includes(token));
-  }
-
-  private isGreetingMessage(normalizedText: string) {
-    const compact = normalizedText.replace(/[!?.\s]+/g, " ").trim();
-    return [
-      "привет",
-      "здравствуйте",
-      "добрый день",
-      "добрый вечер",
-      "доброе утро",
-      "хай",
-      "hello",
-      "hi"
-    ].includes(compact);
-  }
-
   private buildMissingFields(
-    signals: SalesSignals,
+    state: ConversationState,
     options?: { includePhoneForHotLead?: boolean }
-  ) {
+  ): AIDecision["missing_fields"] {
     const missingFields: AIDecision["missing_fields"] = [];
 
-    if (!signals.purpose) {
+    if (!state.purpose) {
       missingFields.push("purpose");
     }
 
-    if (!signals.budgetRub) {
+    if (!state.budgetRub) {
       missingFields.push("budget");
     }
 
-    if (signals.rooms === null) {
+    if (state.rooms === null) {
       missingFields.push("rooms");
     }
 
-    if (!signals.timeline) {
+    if (!state.timeline) {
       missingFields.push("timeline");
     }
 
-    if (options?.includePhoneForHotLead && !signals.hasPhone) {
+    if (options?.includePhoneForHotLead && !state.hasPhone) {
       missingFields.push("phone");
     }
 
     return missingFields;
   }
 
-  private calculateLeadScore(signals: SalesSignals, recommendedCount: number) {
-    let score = 32;
-
-    if (signals.purpose) {
-      score += 10;
-    }
-
-    if (signals.budgetRub) {
-      score += 18;
-    }
-
-    if (signals.rooms !== null) {
-      score += 12;
-    }
-
-    if (signals.timeline) {
-      score += signals.timeline === "urgent" ? 18 : 10;
-    }
-
-    if (recommendedCount > 0) {
-      score += 10;
-    }
-
-    if (signals.wantsCallback || signals.wantsManager) {
-      score += 15;
-    }
-
-    if (signals.hasDiscountObjection || signals.hasPriceObjection || signals.hasHesitation) {
-      score += 4;
-    }
-
-    return Math.min(score, 96);
-  }
-
-  private describeFit(signals: SalesSignals) {
-    if (signals.purpose === "investment") {
-      return " с фокусом на входной билет, ликвидность и понятный формат";
-    }
-
-    if (signals.purpose === "family") {
-      return " с акцентом на семейный сценарий, комфортную планировку и среду";
-    }
-
-    if (signals.purpose === "parents") {
-      return " под спокойный и комфортный сценарий для родителей";
-    }
-
-    if (signals.purpose === "self") {
-      return " под ваш личный сценарий жизни";
-    }
-
-    return "";
-  }
-
-  private isPremiumProject(context: DecisionContext) {
-    const haystack = [
-      context.activeProject?.salesHeadline,
-      context.activeProject?.description,
-      ...context.knowledgeDocuments.map((doc) => `${doc.title} ${doc.excerpt}`)
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    return this.containsAny(haystack, ["преми", "premium", "архитектур", "herzog"]);
-  }
-
-  private truncate(value: string, maxLength: number) {
-    if (value.length <= maxLength) {
-      return value;
-    }
-
-    return `${value.slice(0, maxLength - 1)}…`;
-  }
-
-  private formatRub(value: number) {
-    return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
-  }
-
-  private canRecommendUnits(signals: SalesSignals) {
-    const hasCoreIntent = Boolean(signals.purpose || signals.timeline);
-    const hasSelectionIntent =
-      signals.wantsSelection ||
-      signals.wantsPriceAnswer ||
-      signals.wantsComparison ||
-      signals.wantsBestEntry;
-    const hasCatalogFit = signals.budgetRub !== null || signals.rooms !== null;
-
-    return hasSelectionIntent || (hasCatalogFit && hasCoreIntent);
-  }
-
-  private isShortlistReady(signals: SalesSignals, context: DecisionContext) {
-    const hasBudget = signals.budgetRub !== null;
-    const hasRooms = signals.rooms !== null;
-    const hasScenario = Boolean(signals.purpose || signals.timeline);
-    const hasUnits = context.candidateUnits.length > 0;
-
-    return hasBudget && hasRooms && hasScenario && hasUnits;
-  }
-
-  private shouldUseFastPath(messageText: string, context: DecisionContext) {
-    const signals = this.collectSignals(messageText, context);
-
-    return Boolean(
-      signals.isGreeting ||
-        signals.isPurposeOnly ||
-        signals.isBudgetOnly ||
-        signals.isRoomsOnly ||
-        signals.isTimelineOnly ||
-        signals.wantsManager ||
-        signals.wantsCallback ||
-        signals.wantsBestEntry ||
-        signals.wantsComparison ||
-        signals.hasNegative ||
-        signals.hasSupportIntent ||
-        signals.hasMortgageIntent ||
-        signals.hasPriceObjection ||
-        signals.hasDiscountObjection ||
-        signals.hasHesitation ||
-        (signals.wantsSelection && (signals.budgetRub !== null || signals.rooms !== null || signals.purpose))
-    );
-  }
-
   private reconcileMissingFields(
     decisionMissingFields: AIDecision["missing_fields"],
-    signals: SalesSignals
+    state: ConversationState,
+    turnIntent: TurnIntent
   ) {
     const preservedModelFields = decisionMissingFields.filter(
       (field) => field === "location" || field === "name"
     );
-    const computedFields = this.buildMissingFields(signals);
+    const computed = this.buildMissingFields(state, {
+      includePhoneForHotLead: turnIntent.wantsManager || turnIntent.wantsCallback
+    });
     const phoneField =
-      decisionMissingFields.includes("phone") && !signals.hasPhone ? ["phone" as const] : [];
+      decisionMissingFields.includes("phone") && !state.hasPhone ? ["phone" as const] : [];
 
-    return this.dedupeMissingFields([
-      ...preservedModelFields,
-      ...computedFields,
-      ...phoneField
-    ]);
+    return this.dedupeMissingFields([...preservedModelFields, ...computed, ...phoneField]);
   }
 
   private buildGuidedQuestion(
@@ -1080,10 +838,6 @@ export class AiService {
         return `${projectPrefix}сколько комнат рассматриваете и в какие сроки планируете решение: срочно, 1-3 месяца или пока присматриваетесь?`;
       }
 
-      if (second === "purpose") {
-        return `${projectPrefix}сколько комнат рассматриваете и покупка для жизни, семьи или инвестиций?`;
-      }
-
       return `${projectPrefix}какой формат рассматриваете: студия, 1, 2 или 3 комнаты+?`;
     }
 
@@ -1096,6 +850,137 @@ export class AiService {
     }
 
     return `${projectPrefix}уточню ещё один момент, чтобы подбор был предметным, а не общим.`;
+  }
+
+  private calculateLeadScore(
+    state: ConversationState,
+    turnIntent: TurnIntent,
+    recommendedCount: number
+  ) {
+    let score = 28;
+
+    if (state.purpose) {
+      score += 10;
+    }
+
+    if (state.budgetRub) {
+      score += 18;
+    }
+
+    if (state.rooms !== null) {
+      score += 12;
+    }
+
+    if (state.timeline) {
+      score += state.timeline === "urgent" ? 18 : 10;
+    }
+
+    if (recommendedCount > 0) {
+      score += 10;
+    }
+
+    if (turnIntent.wantsCallback || turnIntent.wantsManager) {
+      score += 12;
+    }
+
+    if (turnIntent.hasDiscountObjection || turnIntent.hasPriceObjection || turnIntent.hasHesitation) {
+      score += 4;
+    }
+
+    return Math.min(score, 96);
+  }
+
+  private isShortlistReady(state: ConversationState, context: DecisionContext) {
+    return Boolean(
+      state.purpose &&
+        state.budgetRub !== null &&
+        state.rooms !== null &&
+        context.candidateUnits.length > 0
+    );
+  }
+
+  private buildKnownFactsSummary(state: ConversationState, context: DecisionContext) {
+    const facts: string[] = [];
+
+    if (context.activeProject?.name) {
+      facts.push(`по ${context.activeProject.name}`);
+    }
+
+    if (state.purpose) {
+      facts.push(this.describePurposeForReply(state.purpose));
+    }
+
+    if (state.budgetRub) {
+      facts.push(`бюджет около ${this.formatRub(state.budgetRub)}`);
+    }
+
+    if (state.rooms !== null) {
+      facts.push(state.rooms === 0 ? "рассматриваете студию" : `рассматриваете ${state.rooms}-комнатный формат`);
+    }
+
+    if (state.timeline) {
+      facts.push(this.describeTimelineForReply(state.timeline));
+    }
+
+    if (facts.length === 0) {
+      return "Понял контекст.";
+    }
+
+    return `Понял: ${facts.join(", ")}.`;
+  }
+
+  private isReaskingKnownInfo(replyText: string, state: ConversationState) {
+    const normalized = replyText.toLowerCase();
+
+    if (
+      state.purpose &&
+      this.containsAny(normalized, [
+        "для какого сценария",
+        "для чего покупаете",
+        "для себя, семьи или инвестиций",
+        "для себя, семьи, инвестиций или родителей"
+      ])
+    ) {
+      return true;
+    }
+
+    if (
+      state.budgetRub &&
+      this.containsAny(normalized, [
+        "какой бюджет",
+        "комфортный бюджет",
+        "какой бюджет комфортен",
+        "подскажите бюджет"
+      ])
+    ) {
+      return true;
+    }
+
+    if (
+      state.rooms !== null &&
+      this.containsAny(normalized, [
+        "сколько комнат",
+        "какой формат",
+        "формат квартиры",
+        "какой формат нужен"
+      ])
+    ) {
+      return true;
+    }
+
+    if (
+      state.timeline &&
+      this.containsAny(normalized, [
+        "в какие сроки",
+        "по срокам",
+        "как быстро хотите",
+        "планируете решение"
+      ])
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   private describePurposeForReply(purpose: PurchasePurpose) {
@@ -1113,103 +998,6 @@ export class AiService {
     }
   }
 
-  private dedupeMissingFields(fields: AIDecision["missing_fields"]) {
-    return Array.from(new Set(fields));
-  }
-
-  private shortenReply(reply: string) {
-    const paragraphs = reply.split("\n\n").filter(Boolean);
-    return paragraphs.slice(0, 2).join("\n\n");
-  }
-
-  private buildKnownFactsSummary(signals: SalesSignals, context: DecisionContext) {
-    const facts: string[] = [];
-
-    if (context.activeProject?.name) {
-      facts.push(`по ${context.activeProject.name}`);
-    }
-
-    if (signals.purpose) {
-      facts.push(this.describePurposeForReply(signals.purpose));
-    }
-
-    if (signals.budgetRub) {
-      facts.push(`бюджет около ${this.formatRub(signals.budgetRub)}`);
-    }
-
-    if (signals.rooms !== null) {
-      facts.push(
-        signals.rooms === 0
-          ? "рассматриваете студию"
-          : `рассматриваете ${signals.rooms}-комнатный формат`
-      );
-    }
-
-    if (signals.timeline) {
-      facts.push(this.describeTimelineForReply(signals.timeline));
-    }
-
-    if (facts.length === 0) {
-      return "Понял контекст.";
-    }
-
-    return `Понял: ${facts.join(", ")}.`;
-  }
-
-  private isReaskingKnownInfo(replyText: string, signals: SalesSignals) {
-    const normalized = replyText.toLowerCase();
-
-    if (
-      signals.purpose &&
-      this.containsAny(normalized, [
-        "для какого сценария",
-        "для чего покупаете",
-        "для себя, семьи или инвестиций",
-        "для себя, семьи, инвестиций или родителей"
-      ])
-    ) {
-      return true;
-    }
-
-    if (
-      signals.budgetRub &&
-      this.containsAny(normalized, [
-        "какой бюджет",
-        "комфортный бюджет",
-        "какой бюджет комфортен",
-        "подскажите бюджет"
-      ])
-    ) {
-      return true;
-    }
-
-    if (
-      signals.rooms !== null &&
-      this.containsAny(normalized, [
-        "сколько комнат",
-        "какой формат",
-        "формат квартиры",
-        "какой формат нужен"
-      ])
-    ) {
-      return true;
-    }
-
-    if (
-      signals.timeline &&
-      this.containsAny(normalized, [
-        "в какие сроки",
-        "по срокам",
-        "как быстро хотите",
-        "планируете решение"
-      ])
-    ) {
-      return true;
-    }
-
-    return false;
-  }
-
   private describeTimelineForReply(timeline: PurchaseTimeline) {
     switch (timeline) {
       case "urgent":
@@ -1223,7 +1011,49 @@ export class AiService {
     }
   }
 
+  private dedupeMissingFields(fields: AIDecision["missing_fields"]) {
+    return Array.from(new Set(fields));
+  }
+
+  private shortenReply(reply: string) {
+    const paragraphs = reply.split("\n\n").filter(Boolean);
+    return paragraphs.slice(0, 2).join("\n\n");
+  }
+
   private normalizeForComparison(value: string) {
     return value.toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
+  private containsAny(normalizedText: string, tokens: string[]) {
+    return tokens.some((token) => normalizedText.includes(token));
+  }
+
+  private isGreetingMessage(normalizedText: string) {
+    const compact = normalizedText.replace(/[!?.\s]+/g, " ").trim();
+    return [
+      "привет",
+      "здравствуйте",
+      "добрый день",
+      "добрый вечер",
+      "доброе утро",
+      "hello",
+      "hi"
+    ].includes(compact);
+  }
+
+  private truncate(value: string | null | undefined, maxLength: number) {
+    if (!value) {
+      return "";
+    }
+
+    if (value.length <= maxLength) {
+      return value;
+    }
+
+    return `${value.slice(0, maxLength - 1)}…`;
+  }
+
+  private formatRub(value: number) {
+    return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
   }
 }

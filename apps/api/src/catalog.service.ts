@@ -35,6 +35,16 @@ export class CatalogService {
     return this.getRelevantProject();
   }
 
+  async getProjectById(id?: string | null) {
+    if (!id) {
+      return null;
+    }
+
+    return this.prisma.project.findUnique({
+      where: { id }
+    });
+  }
+
   async getRelevantProject(messageText?: string) {
     const projects = await this.prisma.project.findMany({
       where: { status: "active" },

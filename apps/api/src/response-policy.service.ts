@@ -19,7 +19,6 @@ export class ResponsePolicyService {
 
     if (decision.recommended_unit_ids.length !== filteredUnits.length) {
       policyFlags.add("availability_unverified");
-      handoffRequired = true;
     }
 
     if (DISALLOWED_PROMISES.some((phrase) => lowerReply.includes(phrase))) {
@@ -31,8 +30,7 @@ export class ResponsePolicyService {
 
     if (filteredUnits.length === 0 && decision.intent === "unit_recommendation") {
       policyFlags.add("availability_unverified");
-      replyText =
-        "Чтобы подобрать точные варианты, уточню пару деталей и при необходимости подключу менеджера для актуального наличия и цены.";
+      handoffRequired = true;
     }
 
     if (!allowCatalogPreview && filteredUnits.length > 0) {
