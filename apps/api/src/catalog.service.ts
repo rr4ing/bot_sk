@@ -194,7 +194,25 @@ export class CatalogService {
     });
   }
 
-  async findReferencedUnit(messageText: string, projectId?: string | null) {
+  async getUnitById(id?: string | null) {
+    if (!id) {
+      return null;
+    }
+
+    return this.prisma.unit.findUnique({
+      where: { id },
+      include: { project: true }
+    });
+  }
+
+  async findReferencedUnit(
+    messageText: string,
+    projectId?: string | null,
+    fallback?: {
+      unitId?: string | null;
+      unitCode?: string | null;
+    }
+  ) {
     const directCode = this.extractUnitCode(messageText);
 
     if (directCode) {
@@ -207,22 +225,61 @@ export class CatalogService {
       });
     }
 
+    const normalized = messageText.toLowerCase();
+    const referencesLastUnit = [
+      "эта квартира",
+      "эту квартиру",
+      "этой квартиры",
+      "этот лот",
+      "этого лота",
+      "по ней",
+      "по нему",
+      "по этой квартире",
+      "по этому лоту",
+      "планировку этой квартиры",
+      "планировку этого лота"
+    ].some((token) => normalized.includes(token));
+
     const shortCodeMatch = messageText.match(/\b(\d{3,4})\b/);
 
-    if (!shortCodeMatch) {
+    if (shortCodeMatch) {
+      return this.prisma.unit.findFirst({
+        where: {
+          code: {
+            contains: `-${shortCodeMatch[1]}-`
+          },
+          ...(projectId ? { projectId } : {})
+        },
+        include: { project: true },
+        orderBy: { priceRub: "asc" }
+      });
+    }
+
+    if (!referencesLastUnit) {
       return null;
     }
 
-    return this.prisma.unit.findFirst({
-      where: {
-        code: {
-          contains: `-${shortCodeMatch[1]}-`
+    if (fallback?.unitId) {
+      return this.prisma.unit.findFirst({
+        where: {
+          id: fallback.unitId,
+          ...(projectId ? { projectId } : {})
         },
-        ...(projectId ? { projectId } : {})
-      },
-      include: { project: true },
-      orderBy: { priceRub: "asc" }
-    });
+        include: { project: true }
+      });
+    }
+
+    if (fallback?.unitCode) {
+      return this.prisma.unit.findFirst({
+        where: {
+          code: fallback.unitCode,
+          ...(projectId ? { projectId } : {})
+        },
+        include: { project: true }
+      });
+    }
+
+    return null;
   }
 
   extractBudget(messageText: string) {

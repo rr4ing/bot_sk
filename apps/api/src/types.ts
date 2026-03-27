@@ -11,6 +11,8 @@ export interface ConversationState {
   hasPhone: boolean;
   activeProjectId?: string | null;
   activeProjectName?: string | null;
+  lastRecommendedUnitId?: string | null;
+  lastRecommendedUnitCode?: string | null;
   lastUserMessage?: string | null;
   updatedAt?: string | null;
 }

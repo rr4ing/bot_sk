@@ -39,6 +39,10 @@ export class ConversationService {
       hasPhone: Boolean(state.hasPhone),
       activeProjectId: typeof state.activeProjectId === "string" ? state.activeProjectId : null,
       activeProjectName: typeof state.activeProjectName === "string" ? state.activeProjectName : null,
+      lastRecommendedUnitId:
+        typeof state.lastRecommendedUnitId === "string" ? state.lastRecommendedUnitId : null,
+      lastRecommendedUnitCode:
+        typeof state.lastRecommendedUnitCode === "string" ? state.lastRecommendedUnitCode : null,
       lastUserMessage: typeof state.lastUserMessage === "string" ? state.lastUserMessage : null,
       updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : null
     };

@@ -60,8 +60,11 @@ export class TelegramService {
 
     const history = await this.conversations.getHistory(conversation.id);
     const conversationText = this.buildDecisionText(history);
+    const effectiveStoredState = this.shouldResetConversationState(normalizedMessageText)
+      ? this.resetConversationState(storedState)
+      : storedState;
     const activeProject =
-      (await this.catalog.getProjectById(storedState?.activeProjectId)) ??
+      (await this.catalog.getProjectById(effectiveStoredState?.activeProjectId)) ??
       (await this.catalog.getRelevantProject(conversationText));
     const conversationState = this.ai.deriveConversationState(normalizedMessageText, {
       activeProject,
@@ -70,14 +73,17 @@ export class TelegramService {
       knowledgeDocuments: [],
       history,
       conversationText,
-      conversationState: storedState
+      conversationState: effectiveStoredState
     });
     const [candidateUnits, projectEntryUnit, knowledgeDocuments, referencedUnit] =
       await Promise.all([
         this.catalog.findCandidateUnitsForState(conversationState, activeProject?.id),
         this.catalog.findProjectEntryUnit(activeProject?.id),
         this.knowledge.getRelevantDocuments(conversationText),
-        this.catalog.findReferencedUnit(normalizedMessageText, activeProject?.id)
+        this.catalog.findReferencedUnit(normalizedMessageText, activeProject?.id, {
+          unitId: effectiveStoredState?.lastRecommendedUnitId ?? null,
+          unitCode: effectiveStoredState?.lastRecommendedUnitCode ?? null
+        })
       ]);
     const decisionUnits = this.mergeUnits(candidateUnits, projectEntryUnit, referencedUnit);
     const decision =
@@ -95,6 +101,12 @@ export class TelegramService {
             conversationState
           });
     const safeDecision = this.policy.enforce(decision, decisionUnits);
+    const primaryRecommendedUnit =
+      referencedUnit ??
+      decisionUnits.find((unit) => safeDecision.recommended_unit_ids.includes(unit.id)) ??
+      (safeDecision.recommended_unit_ids[0]
+        ? await this.catalog.getUnitById(safeDecision.recommended_unit_ids[0])
+        : null);
 
     await this.conversations.appendMessage(
       conversation.id,
@@ -109,7 +121,11 @@ export class TelegramService {
       safeDecision.intent,
       safeDecision.lead_score,
       this.mergeConversationMetadata(conversation.metadata, {
-        conversation_state: conversationState,
+        conversation_state: {
+          ...conversationState,
+          lastRecommendedUnitId: primaryRecommendedUnit?.id ?? null,
+          lastRecommendedUnitCode: primaryRecommendedUnit?.code ?? null
+        },
         missing_fields: safeDecision.missing_fields,
         policy_flags: safeDecision.policy_flags
       })
@@ -256,6 +272,45 @@ export class TelegramService {
     return {
       ...base,
       ...patch
+    };
+  }
+
+  private shouldResetConversationState(messageText: string) {
+    const normalized = messageText.toLowerCase().trim();
+
+    return (
+      [
+        "по другому запросу",
+        "по другому сценарию",
+        "другой запрос",
+        "сменим запрос",
+        "с нуля",
+        "заново"
+      ].some((token) => normalized.includes(token)) || this.isPureGreeting(normalized)
+    );
+  }
+
+  private isPureGreeting(messageText: string) {
+    return /^(привет|здравствуйте|добрый день|добрый вечер|приветствую|\/start|start)[!. ]*$/i.test(
+      messageText
+    );
+  }
+
+  private resetConversationState(
+    state: ReturnType<ConversationService["readConversationState"]>
+  ) {
+    return {
+      purpose: null,
+      budgetRub: null,
+      rooms: null,
+      timeline: null,
+      hasPhone: state?.hasPhone ?? false,
+      activeProjectId: state?.activeProjectId ?? null,
+      activeProjectName: state?.activeProjectName ?? null,
+      lastRecommendedUnitId: null,
+      lastRecommendedUnitCode: null,
+      lastUserMessage: null,
+      updatedAt: new Date().toISOString()
     };
   }
 
